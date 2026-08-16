@@ -224,17 +224,26 @@ def _ufs(bruto: str) -> tuple[str, ...]:
     )
 
 
-# UFs que ela atende (rodapé do site: SP RJ SC PR RS MG BA PE DF GO).
-# Vazio = aceita qualquer UF.
-UFS_ATENDIDAS = _ufs(os.getenv("UFS_ATENDIDAS", "SP,RJ,SC,PR,RS,MG,BA,PE,DF,GO"))
+# UFs que ela atende, conforme milenarezner.com.br. Vazio = aceita qualquer UF.
+#
+# O site ainda diz "demais estados sob demanda, com rede de correspondentes" —
+# ou seja, esta lista é o alcance PRÓPRIO, não o limite do que ela consegue
+# atender. Se a rede de correspondentes for para valer, o certo é esvaziar a
+# lista (um campo no painel) e deixar passar demanda presencial de qualquer
+# lugar: quem decide se compensa acionar um correspondente é ela, não o bot.
+UFS_ATENDIDAS = _ufs(
+    os.getenv("UFS_ATENDIDAS", "SP,RJ,SC,PR,RS,MG,BA,PE,DF,GO,ES,CE")
+)
 # Post que não declara lugar nenhum: aceitar? Sim, por padrão — em grupo
 # regional o lugar está implícito no grupo, e o atendimento dela é 100% digital.
 # Descartar por omissão mataria a maior parte das demandas boas.
 ACEITAR_SEM_LOCAL = _flag("ACEITAR_SEM_LOCAL", True)
 
 # --- Apresentação do bot no privado ---------------------------------------
-SITE_URL = os.getenv("SITE_URL", "https://milenarezner.com.br").strip()
-INSTAGRAM_URL = os.getenv("INSTAGRAM_URL", "").strip()
+SITE_URL = os.getenv("SITE_URL", "https://www.milenarezner.com.br").strip()
+INSTAGRAM_URL = os.getenv(
+    "INSTAGRAM_URL", "https://instagram.com/advmilenarezner"
+).strip()
 SUPORTE_TELEGRAM = os.getenv("SUPORTE_TELEGRAM", "").strip()
 
 

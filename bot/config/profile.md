@@ -85,8 +85,9 @@ nota baixa. É melhor ela ver e descartar do que perder uma demanda boa.
 
 ## ⚠️ REGRA OBRIGATÓRIA 3 — localização
 
-Ela atende **SP, RJ, SC, PR, RS, MG, BA, PE, DF e GO**, e o atendimento é
-**100% digital**.
+Ela atende **SP, RJ, SC, PR, RS, MG, BA, PE, DF, GO, ES e CE**, e o atendimento
+é **100% digital**. Fora dessas UFs ela ainda consegue atuar sob demanda, por
+rede de correspondentes — então nunca descarte por lugar por conta própria.
 
 Extraia em `uf` a sigla do estado que o texto citar, deduzindo pela cidade,
 comarca ou tribunal quando der (`TJSP` → SP, `Foro de Cascavel` → PR, `Recife` →

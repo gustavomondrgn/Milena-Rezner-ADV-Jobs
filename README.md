@@ -51,6 +51,13 @@ A regra de localização é a que mais gente entende ao contrário. Ela **não**
 pergunta "onde é a demanda?"; pergunta "alguém precisa estar fisicamente lá?".
 Elaborar contrato para uma empresa de Manaus passa; audiência em Manaus não.
 
+> **Decisão em aberto.** O site dela diz atender 12 estados *"e demais estados
+> sob demanda, com rede de correspondentes"*. Se essa rede vale na prática, o
+> certo é **esvaziar `UFS_ATENDIDAS`** — desmarcar todos os estados no painel —
+> e deixar passar demanda presencial de qualquer lugar. Quem decide se compensa
+> acionar um correspondente é ela, não o bot. A lista de 12 é o alcance próprio,
+> e é o padrão conservador até alguém decidir o contrário.
+
 ## A fonte Facebook
 
 Não existe API. O Facebook fechou o acesso de terceiros a grupos em 2018, e o
@@ -211,7 +218,7 @@ conserta com uma frase no `profile.md`, não com uma linha de código.
 | `SEND_WINDOW_START` / `_END` | Janela de envio | `6` / `23` |
 | `MIN_SCORE` | Nota mínima para entrar na fila | `0` |
 | `REJEITAR_DIVULGACAO` | Recusar advogado se anunciando | `true` |
-| `UFS_ATENDIDAS` | UFs. Vazio = todas | `SP,RJ,SC,PR,RS,MG,BA,PE,DF,GO` |
+| `UFS_ATENDIDAS` | UFs. **Vazio = todas** | `SP,RJ,SC,PR,RS,MG,BA,PE,DF,GO,ES,CE` |
 | `ACEITAR_SEM_LOCAL` | Aceitar demanda presencial sem local declarado | `true` |
 | `REJECT_ENGLISH` | Recusar post em inglês | `true` |
 | `DATABASE_URL` | Postgres do painel. Vazio = bot roda igual, sem dashboard | — |

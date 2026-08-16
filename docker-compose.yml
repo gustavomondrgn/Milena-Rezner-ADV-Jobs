@@ -88,12 +88,12 @@ services:
       - RECHECK_DIAS=${RECHECK_DIAS:-30}
       # --- Regras de corte ---
       - REJEITAR_DIVULGACAO=${REJEITAR_DIVULGACAO:-true}
-      - UFS_ATENDIDAS=${UFS_ATENDIDAS:-SP,RJ,SC,PR,RS,MG,BA,PE,DF,GO}
+      - UFS_ATENDIDAS=${UFS_ATENDIDAS:-SP,RJ,SC,PR,RS,MG,BA,PE,DF,GO,ES,CE}
       - ACEITAR_SEM_LOCAL=${ACEITAR_SEM_LOCAL:-true}
       - REJECT_ENGLISH=${REJECT_ENGLISH:-true}
       # --- Apresentação do bot no privado ---
-      - SITE_URL=${SITE_URL:-}
-      - INSTAGRAM_URL=${INSTAGRAM_URL:-}
+      - SITE_URL=${SITE_URL:-https://www.milenarezner.com.br}
+      - INSTAGRAM_URL=${INSTAGRAM_URL:-https://instagram.com/advmilenarezner}
       - SUPORTE_TELEGRAM=${SUPORTE_TELEGRAM:-}
       # Banco do painel. Vazio = bot roda igual, só sem alimentar o dashboard.
       - DATABASE_URL=${DATABASE_URL:-}
