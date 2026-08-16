@@ -1,0 +1,23 @@
+requests>=2.31.0
+python-dotenv>=1.0.0
+google-genai>=0.3.0
+
+# Navegador de verdade para ler os grupos do Facebook. Não existe API: o
+# conteúdo é montado por JavaScript atrás de login, então HTTP puro devolve
+# esqueleto. Instalar o pacote NÃO basta — é preciso baixar o browser:
+#     playwright install --with-deps chromium
+playwright>=1.44
+
+# Base de fusos horários: a imagem slim não traz, e sem ela o zoneinfo não
+# resolve "America/Sao_Paulo" e o relatório sairia no horário errado.
+tzdata>=2024.1
+
+# Postgres, só para alimentar o painel. O bot funciona sem banco — se o
+# DATABASE_URL não estiver setado, `store.py` inteiro vira no-op.
+psycopg[binary]>=3.1
+
+# OPCIONAL — só se um dia as fontes Indeed/LinkedIn forem religadas em SOURCES.
+# Ficou de fora do padrão porque puxa o pandas junto (dezenas de MB na imagem) e
+# amarra o projeto ao Python 3.12, e as duas fontes estão desligadas. O código
+# delas continua no repositório e degrada com erro claro se faltar o pacote.
+#     python-jobspy>=1.1.80

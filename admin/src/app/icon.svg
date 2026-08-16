@@ -1,0 +1,15 @@
+<svg width="600" height="600" viewBox="0 0 600 600" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Ícone do painel. Cores FIXAS de propósito: favicon é servido como arquivo
+       e não enxerga as variáveis de tema do CSS. Espresso + ouro, a paleta do
+       site da Milena. -->
+  <rect width="600" height="600" rx="300" fill="#241C17"/>
+  <g transform="translate(150,150) scale(6.25)">
+    <path d="M12 40 C 17 31 24 22 33 15" stroke="#C9A46A" stroke-width="3.2" stroke-linecap="round" fill="none"/>
+    <g fill="#C9A46A">
+      <path d="M0 0 C 4 -4.2 11 -4.2 16 0 C 11 4.2 4 4.2 0 0 Z" transform="translate(24,23) rotate(-46)"/>
+      <path d="M0 0 C 4 -4.2 11 -4.2 16 0 C 11 4.2 4 4.2 0 0 Z" transform="translate(18,32) rotate(-10)"/>
+      <path d="M0 0 C 3.4 -3.6 9.4 -3.6 13.6 0 C 9.4 3.6 3.4 3.6 0 0 Z" transform="translate(19,31) rotate(197)"/>
+      <circle cx="36" cy="11.5" r="4.2"/>
+    </g>
+  </g>
+</svg>

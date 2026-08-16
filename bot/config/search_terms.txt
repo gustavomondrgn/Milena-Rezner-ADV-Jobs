@@ -1,0 +1,29 @@
+# Termos de busca para as fontes de PORTAL (Gupy, Indeed, LinkedIn).
+#
+# ⚠️ Estas fontes estão DESLIGADAS por padrão (ver SOURCES no .env). Elas vieram
+# testadas do projeto anterior e ficam aqui para o dia em que se quiser também
+# vaga de emprego formal de advogado — que é um produto diferente do que este
+# bot faz hoje (demanda avulsa e cliente direto, vindos do Facebook).
+#
+# Cada termo é UMA requisição por ciclo em CADA fonte ligada. Vinte termos com
+# duas fontes ligadas a cada hora são ~960 requisições por dia. Pesar antes de
+# acrescentar.
+#
+# Uma linha por termo. `#` comenta.
+
+advogado
+advogada
+advogado imobiliario
+advogado empresarial
+advogado societario
+advogado contratos
+analista juridico
+assistente juridico
+consultor juridico
+departamento juridico
+juridico imobiliario
+juridico empresarial
+advogado civel
+advogado contencioso
+advogado consultivo
+correspondente juridico

@@ -1,0 +1,10 @@
+﻿# Lista CURTA, exclusiva do LinkedIn.
+#
+# La cada vaga custa DUAS requisicoes (busca + descricao), entao a lista e curta
+# de proposito. A fonte esta desligada por padrao neste projeto - ver SOURCES.
+
+advogado
+advogada
+advogado imobiliario
+advogado empresarial
+analista juridico

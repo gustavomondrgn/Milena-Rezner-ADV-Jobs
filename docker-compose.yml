@@ -1,0 +1,161 @@
+services:
+  # O Postgres mora AQUI DENTRO, e não como recurso separado do Coolify, por um
+  # motivo prático: serviços do mesmo compose compartilham rede automaticamente
+  # e se enxergam pelo nome. Um banco criado à parte fica noutra rede e exige
+  # ligar "Connect To Predefined Network" na interface — um passo manual, fácil
+  # de esquecer num redeploy futuro, e que já custou tempo uma vez.
+  postgres:
+    image: postgres:16-alpine
+    container_name: adv-jobs-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-advjobs}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB:-advjobs}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    # Sem porta publicada: só quem está neste compose alcança o banco. Não há
+    # rota da internet até ele, o que é a razão de a senha não ser a única
+    # defesa.
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-advjobs} -d ${POSTGRES_DB:-advjobs}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  adv-jobs-bot:
+    build:
+      # Contexto na raiz para a imagem alcançar `db/schema.sql`, que o bot
+      # aplica no boot e o painel consome.
+      context: .
+      dockerfile: bot/Dockerfile
+    container_name: adv-jobs-bot
+    restart: unless-stopped
+    # NÃO usar `env_file: .env` — o .env está no .gitignore, então ele não existe
+    # no repositório que o Coolify clona e o compose quebra antes de subir.
+    # Com substituição de variáveis funciona nos dois casos: local o compose lê
+    # o .env da pasta automaticamente, e em produção o Coolify injeta as vars.
+    environment:
+      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.1-flash-lite}
+      - CHECK_INTERVAL=${CHECK_INTERVAL:-600}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # Vazio = usa bot/config/ dentro da imagem. Só preencher para apontar
+      # para um arquivo montado por fora.
+      - PROFILE_FILE=${PROFILE_FILE:-}
+      - FACEBOOK_GROUPS_FILE=${FACEBOOK_GROUPS_FILE:-}
+      - TERMS_FILE=${TERMS_FILE:-}
+      - LINKEDIN_TERMS_FILE=${LINKEDIN_TERMS_FILE:-}
+      - SOURCES=${SOURCES:-facebook}
+      - INTERVAL_FACEBOOK=${INTERVAL_FACEBOOK:-1800}
+      # Fontes de portal, desligadas por padrão. Religar exige acrescentar
+      # `python-jobspy` ao requirements.txt (ver o comentário de lá).
+      - INTERVAL_GUPY=${INTERVAL_GUPY:-3600}
+      - INTERVAL_INDEED=${INTERVAL_INDEED:-3600}
+      - INTERVAL_LINKEDIN=${INTERVAL_LINKEDIN:-7200}
+      # --- Facebook ---
+      # Headless SEMPRE em produção: não há tela no servidor.
+      - FACEBOOK_HEADLESS=${FACEBOOK_HEADLESS:-true}
+      - FACEBOOK_MAX_POSTS=${FACEBOOK_MAX_POSTS:-25}
+      - FACEBOOK_SCROLLS=${FACEBOOK_SCROLLS:-4}
+      # Vazio = <DATA_DIR>/fb_state.json, que é onde o login manual deposita.
+      - FACEBOOK_STATE_FILE=${FACEBOOK_STATE_FILE:-}
+      - TIMEZONE=${TIMEZONE:-America/Sao_Paulo}
+      - REPORT_HOUR=${REPORT_HOUR:-22}
+      - REPORT_TO=${REPORT_TO:-grupo}
+      # Privado de quem mantém. Recebe ALERTA DE OPERAÇÃO (sessão do Facebook
+      # expirada, fonte quebrada) — nunca demanda. Sem isto, o aviso de sessão
+      # morta fica só no log, e sessão morta é a falha silenciosa deste bot.
+      - REPORT_CHAT_IDS=${REPORT_CHAT_IDS:-}
+      # --- Volume ---
+      # 0 = SEM TETO (padrão deste projeto). O painel sobrescreve sem redeploy.
+      - DAILY_LIMIT=${DAILY_LIMIT:-0}
+      - SEND_WINDOW_START=${SEND_WINDOW_START:-6}
+      - SEND_WINDOW_END=${SEND_WINDOW_END:-23}
+      - QUEUE_TTL_DAYS=${QUEUE_TTL_DAYS:-3}
+      - MIN_SCORE=${MIN_SCORE:-0}
+      # Post de Facebook não sai do ar quando a demanda é atendida, então a
+      # revisão fica desligada. Ver o comentário em bot/vitality.py.
+      - ACAO_VAGA_ENCERRADA=${ACAO_VAGA_ENCERRADA:-nada}
+      # --- Regras de corte ---
+      - REJEITAR_DIVULGACAO=${REJEITAR_DIVULGACAO:-true}
+      - UFS_ATENDIDAS=${UFS_ATENDIDAS:-SP,RJ,SC,PR,RS,MG,BA,PE,DF,GO}
+      - ACEITAR_SEM_LOCAL=${ACEITAR_SEM_LOCAL:-true}
+      - REJECT_ENGLISH=${REJECT_ENGLISH:-true}
+      # --- Apresentação do bot no privado ---
+      - SITE_URL=${SITE_URL:-}
+      - INSTAGRAM_URL=${INSTAGRAM_URL:-}
+      - SUPORTE_TELEGRAM=${SUPORTE_TELEGRAM:-}
+      # Banco do painel. Vazio = bot roda igual, só sem alimentar o dashboard.
+      - DATABASE_URL=${DATABASE_URL:-}
+      # DATA_DIR fica fixo no volume — não sobrescrever pelo painel.
+      - DATA_DIR=/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      # Sobrevivem a redeploy: seen_ids.json, send_queue.json, daily_stats.json,
+      # publicadas.json, chat_id.json e — o mais caro de perder —
+      # **fb_state.json**, a sessão do Facebook. Os outros o bot reconstrói
+      # sozinho; a sessão exige alguém logar na mão de novo.
+      - bot-data:/app/data
+
+  admin:
+    build:
+      context: .
+      dockerfile: admin/Dockerfile
+    container_name: adv-jobs-admin
+    restart: unless-stopped
+    # Rota do Traefik declarada na mão.
+    #
+    # A variável `SERVICE_FQDN_*` do Coolify — tentada no projeto anterior — só
+    # vale para os "Services" de um clique dele, não para uma aplicação com
+    # docker-compose próprio: o Traefik respondia 404 porque nenhuma rota
+    # chegava a existir. Para aplicação, o caminho suportado é o campo Domains
+    # da interface, que a API da 4.1.2 não persiste. Declarar os labels aqui
+    # resolve os dois problemas: funciona sem clique e fica versionado.
+    #
+    # ADMIN_DOMAIN precisa estar cadastrado no Coolify. Sem ele o Traefik sobe
+    # uma rota para `admin.localhost`, que não responde de fora — de propósito:
+    # é melhor não abrir nada do que abrir num domínio errado.
+    labels:
+      - traefik.enable=true
+      # HTTP só existe para mandar todo mundo para o HTTPS.
+      - traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https
+      - traefik.http.routers.advadmin-http.entrypoints=http
+      - traefik.http.routers.advadmin-http.rule=Host(`${ADMIN_DOMAIN:-admin.localhost}`)
+      - traefik.http.routers.advadmin-http.middlewares=redirect-to-https
+      # HTTPS com certificado emitido pelo mesmo resolver que o Coolify usa.
+      - traefik.http.routers.advadmin.entrypoints=https
+      - traefik.http.routers.advadmin.rule=Host(`${ADMIN_DOMAIN:-admin.localhost}`)
+      - traefik.http.routers.advadmin.tls=true
+      - traefik.http.routers.advadmin.tls.certresolver=letsencrypt
+      - traefik.http.routers.advadmin.service=advadmin
+      - traefik.http.services.advadmin.loadbalancer.server.port=3000
+    environment:
+      # Mesmo Postgres do bot: um escreve os eventos, o outro os lê.
+      - DATABASE_URL=${DATABASE_URL}
+      # Assina o cookie de sessão. Sem isto o painel se recusa a subir — é o
+      # que impede alguém de forjar uma sessão de administrador.
+      - AUTH_SECRET=${AUTH_SECRET}
+      # Para montar o link `t.me/c/<id>/<mensagem>` de cada demanda publicada.
+      # Só funciona com SUPERGRUPO (id começando em -100); em grupo básico o
+      # painel simplesmente não mostra link.
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - NODE_ENV=production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # O Coolify põe o Traefik na frente e cuida do certificado; a porta não
+    # precisa ser publicada no host.
+    expose:
+      - "3000"
+
+volumes:
+  bot-data:
+  postgres-data:

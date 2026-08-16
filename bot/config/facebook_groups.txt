@@ -1,0 +1,50 @@
+# Grupos do Facebook que o bot lê.
+# =============================================================================
+# ESTE ARQUIVO DEFINE O ALCANCE DO BOT INTEIRO. Vazio = ele não tem o que ler.
+#
+# Formato, um grupo por linha:
+#
+#     <URL ou id do grupo> | <nome legível> | <UF>
+#
+#   • URL ou id  — obrigatório. Aceita a URL inteira, o id numérico ou o
+#                  apelido que aparece na URL. Estes três são equivalentes:
+#                       https://www.facebook.com/groups/123456789
+#                       https://www.facebook.com/groups/advogadosdecuritiba/
+#                       123456789
+#   • nome       — opcional. Só aparece no log e no painel. Se ficar vazio, o
+#                  id é usado.
+#   • UF         — opcional, mas é o campo que faz este projeto funcionar.
+#
+# POR QUE A UF IMPORTA
+# ---------------------
+# Post de grupo quase nunca diz a cidade — o grupo *é* a cidade. Num grupo
+# chamado "Advogados de Cascavel e Região", ninguém escreve "em Cascavel".
+# A UF preenchida aqui é usada quando o texto do post não disser nada; se o post
+# citar uma comarca, o que está escrito ganha da presunção, sempre.
+#
+# Deixe a UF em branco em grupo nacional ("Correspondentes Jurídicos Brasil"),
+# senão o bot presumiria um estado que não existe naquele contexto.
+#
+# ANTES DE ADICIONAR UM GRUPO AQUI
+# --------------------------------
+# A conta usada no `tools/facebook_login.py` precisa **já ser membro** do grupo.
+# O bot não pede para entrar e não entra sozinho: ele lê o que a conta já pode
+# ler. Grupo em que a conta não está devolve zero post, sem erro.
+#
+# CUSTO DE CADA LINHA
+# -------------------
+# Cada grupo é uma página carregada por ciclo (a cada 30 min por padrão). Cinco
+# a dez grupos é uma faixa confortável. Trinta grupos é meia hora de navegador
+# aberto e um bom jeito de chamar atenção do Facebook.
+#
+# Editar este arquivo NÃO exige reiniciar o bot rodando local — ele relê quando
+# o arquivo muda. Em produção, editar → commit → push → redeploy.
+# =============================================================================
+
+# --- PREENCHER ---------------------------------------------------------------
+# Exemplos do formato (comentados — troque pelos grupos de verdade):
+#
+# https://www.facebook.com/groups/123456789   | Advogados de Curitiba     | PR
+# https://www.facebook.com/groups/987654321   | Advogados SP Capital      | SP
+# correspondentesjuridicosbrasil              | Correspondentes Brasil    |
+# https://www.facebook.com/groups/111222333   | Síndicos e Condomínios PR | PR

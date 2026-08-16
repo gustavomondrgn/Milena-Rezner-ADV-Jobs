@@ -1,0 +1,234 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   Identidade — extraída do site da Milena Rezner Advocacia.
+
+   A logo tem quatro cores: o azul-marinho do fundo, o azul vivo do anel, o
+   azul claro da faceta do "A" e o branco. O painel usa as quatro, mas com
+   papéis muito desiguais de propósito: a superfície é neutra e o azul aparece
+   só onde a pessoa precisa olhar — botão primário, item ativo da navegação,
+   série principal do gráfico, número em destaque.
+
+   Se tudo for azul, nada é azul.
+--------------------------------------------------------------------------- */
+
+@theme {
+  /* Azul vivo do anel da logo — a cor de ação. */
+  --color-brand-50:  #eef5ff;
+  --color-brand-100: #d9e8ff;
+  --color-brand-200: #bcd7ff;
+  --color-brand-300: #8cbef8;  /* faceta clara do "A" */
+  --color-brand-400: #5b9bf5;
+  --color-brand-500: #1c6ef2;  /* anel */
+  --color-brand-600: #0f57d4;
+  --color-brand-700: #0d45a8;
+  --color-brand-800: #103a85;
+  --color-brand-900: #0a1d48;  /* marinho do fundo */
+  --color-brand-950: #061029;
+
+  /* Neutros levemente frios, para conversarem com o azul sem competir. */
+  --color-slate-25: #fbfcfe;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+               "Helvetica Neue", Arial, sans-serif;
+
+  --radius-card: 0.875rem;
+}
+
+/* --- Superfícies -----------------------------------------------------------
+   Tokens semânticos em vez de cor crua nos componentes: trocar o tema é mexer
+   aqui, e não em quarenta arquivos.
+--------------------------------------------------------------------------- */
+
+/* O tema tem TRÊS estados, não dois:
+     - `data-tema="claro"`  → o usuário escolheu claro
+     - `data-tema="escuro"` → o usuário escolheu escuro
+     - atributo ausente     → segue o sistema (o padrão)
+
+   Por isso a paleta clara mora no `:root` puro (vale sempre, é o piso), o
+   escuro do sistema é aplicado só quando o usuário NÃO pediu claro, e a escolha
+   explícita por escuro vem por último para ganhar dos dois. Definir uma cor
+   apenas dentro do `@media` faria o botão de tema não funcionar em máquina
+   configurada no claro. */
+
+/* A paleta é a do site da Milena Rezner, medida nele: fundo osso, espresso
+   profundo e um ouro/bronze fosco no lugar do azul corporativo. Nada de azul
+   aqui — o painel é uma extensão da marca dela, não um dashboard genérico. */
+
+:root {
+  --fundo:          #faf8f5;
+  --superficie:     #ffffff;
+  --superficie-2:   #f4f1ec;
+  --borda:          #e8e2d9;
+  --borda-forte:    #d3cabb;
+  --texto:          #241c17;
+  --texto-suave:    #5a5350;
+  --texto-fraco:    #938a80;
+  --acento:         #a9803f;
+  --acento-suave:   #f6efe3;
+  --positivo:       #4a7c59;
+  --atencao:        #b8860b;
+  --negativo:       #b04a3f;
+  --sombra:         0 1px 2px rgba(36, 28, 23, .04), 0 1px 3px rgba(36, 28, 23, .06);
+
+  /* Marca: o ramo de oliveira. Duas cores, porque o desenho é só isso — o
+     latão do ramo e a tinta do fundo/contorno. No tema claro a tinta é o
+     espresso; no escuro ela vira osso, senão o mark sumiria. */
+  --marca-ouro:  #a9803f;
+  --marca-tinta: #241c17;
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-tema="claro"]) {
+    --fundo:        #16110e;
+    --superficie:   #1e1815;
+    --superficie-2: #2a221c;
+    --borda:        #362c24;
+    --borda-forte:  #4a3d32;
+    --texto:        #f7f5f2;
+    --texto-suave:  #b5aaa0;
+    --texto-fraco:  #857a70;
+    --acento:       #c9a46a;
+    --acento-suave: #2a2114;
+    --positivo:     #6fa87d;
+    --atencao:      #d9a441;
+    --negativo:     #d1786c;
+    --sombra:       0 1px 2px rgba(0, 0, 0, .4);
+    --marca-ouro:   #c9a46a;
+    --marca-tinta:  #f7f5f2;
+    color-scheme: dark;
+  }
+}
+
+:root[data-tema="escuro"] {
+  --fundo:        #16110e;
+  --superficie:   #1e1815;
+  --superficie-2: #2a221c;
+  --borda:        #362c24;
+  --borda-forte:  #4a3d32;
+  --texto:        #f7f5f2;
+  --texto-suave:  #b5aaa0;
+  --texto-fraco:  #857a70;
+  --acento:       #c9a46a;
+  --acento-suave: #2a2114;
+  --positivo:     #6fa87d;
+  --atencao:      #d9a441;
+  --negativo:     #d1786c;
+  --sombra:       0 1px 2px rgba(0, 0, 0, .4);
+  --marca-ouro:   #c9a46a;
+  --marca-tinta:  #f7f5f2;
+  color-scheme: dark;
+}
+
+* { border-color: var(--borda); }
+
+body {
+  background: var(--fundo);
+  color: var(--texto);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Nada no painel deve empurrar a página para os lados. Quando um conteúdo é
+   largo de verdade — a tabela de vagas, por exemplo — quem rola é o contêiner
+   dele, nunca o corpo da página.
+
+   `clip` e não `hidden` de propósito: `hidden` transformaria a raiz num
+   contêiner de rolagem e quebraria o `position: sticky` da barra lateral. */
+html { overflow-x: clip; }
+
+/* Toque: sem o atraso de 300ms do duplo-toque e sem o retângulo cinza do
+   Android por cima do nosso próprio estado de :active. */
+a, button, summary, label, input, select, [role="button"] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Números de métrica alinhados em coluna: sem isso a tabela "dança" quando um
+   valor passa de 9 para 10. */
+.tabular { font-variant-numeric: tabular-nums; }
+
+/* --- Componentes recorrentes ---------------------------------------------- */
+
+.cartao {
+  background: var(--superficie);
+  border: 1px solid var(--borda);
+  border-radius: var(--radius-card);
+  box-shadow: var(--sombra);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  border-radius: .625rem;
+  font-weight: 550;
+  font-size: .875rem;
+  padding: .5625rem 1rem;
+  transition: background .15s, border-color .15s, opacity .15s;
+  cursor: pointer;
+}
+.btn:disabled { opacity: .55; cursor: not-allowed; }
+
+.btn-primario {
+  background: var(--acento);
+  color: #fff;
+  border: 1px solid transparent;
+}
+.btn-primario:hover:not(:disabled) { background: var(--color-brand-600); }
+
+.btn-neutro {
+  background: var(--superficie);
+  color: var(--texto);
+  border: 1px solid var(--borda-forte);
+}
+.btn-neutro:hover:not(:disabled) { background: var(--superficie-2); }
+
+.campo {
+  width: 100%;
+  background: var(--superficie);
+  border: 1px solid var(--borda-forte);
+  border-radius: .625rem;
+  padding: .5625rem .75rem;
+  font-size: .875rem;
+  color: var(--texto);
+  outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+.campo:focus {
+  border-color: var(--acento);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--acento) 18%, transparent);
+}
+
+.rotulo {
+  font-size: .75rem;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--texto-fraco);
+}
+
+/* --- Toque ------------------------------------------------------------------
+   Duas correções que valem só para quem aponta com o dedo (`pointer: coarse`),
+   sem engordar a interface de quem usa mouse:
+
+   1. **Campo com 16px.** Abaixo disso o Safari do iPhone dá zoom sozinho ao
+      focar o campo — e, pior, não volta ao sair. É a causa nº 1 de "o painel
+      ficou torto no celular".
+   2. **Alvo de 44px.** Dedo não é cursor: botão de 36px é o suficiente para
+      errar o toque com o painel na mão, andando.
+--------------------------------------------------------------------------- */
+@media (pointer: coarse) {
+  .campo, .btn { min-height: 2.75rem; }
+  .campo, select.campo { font-size: 1rem; }
+}
+
+/* Foco visível e consistente para quem navega por teclado. */
+:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
