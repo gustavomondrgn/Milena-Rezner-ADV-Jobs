@@ -105,17 +105,16 @@ export function Nota({ valor }: { valor: number }) {
  * saiu do grupo. Uma bolinha lisa, sem pulso nem halo: numa lista de 25 linhas,
  * efeito em volta do ponto vira ruído — a cor já diz tudo.
  *
- * ⚠️ **Fora de uso enquanto a única fonte for o Facebook.** Post de grupo não
- * sai do ar quando a pessoa contrata alguém, então `closed_at` seria sempre
- * nulo e a bolinha seria verde em 100% das linhas — um enfeite afirmando algo
- * que ninguém verificou. Voltar a usar se uma fonte com API for religada; ver
- * `SEM_VERIFICACAO` em `bot/vitality.py`.
+ * No Facebook o vermelho significa "o post foi removido" — apagado pelo autor,
+ * tirado pelo moderador ou grupo fechado. Não significa "a demanda foi
+ * atendida": quem resolve raramente volta para apagar o post. Vermelho é raro
+ * aqui de propósito, e é essa raridade que o torna informativo.
  */
 export function Bolinha({ fechadaEm }: { fechadaEm: string | null }) {
   const aberta = !fechadaEm;
   const titulo = aberta
-    ? 'Vaga ainda aberta na plataforma'
-    : 'Vaga encerrada na plataforma — a mensagem foi removida do grupo';
+    ? 'Post ainda no ar no Facebook'
+    : 'Post removido do Facebook — a mensagem saiu do grupo';
   return (
     <span className="inline-flex items-center" title={titulo} aria-label={titulo}>
       <span

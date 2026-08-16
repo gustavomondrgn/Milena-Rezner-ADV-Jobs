@@ -86,7 +86,7 @@ class SendQueue:
 
     def push(self, *, uid: str, source: str, title: str, html: str,
              score: int, category: str, published_at: str, agora: datetime,
-             categoria: str = "", tipo_demanda: str = "") -> None:
+             categoria: str = "", tipo_demanda: str = "", url: str = "") -> None:
         """Coloca uma vaga aprovada na fila.
 
         O HTML já vem renderizado. Renderizar agora e não na hora do envio deixa
@@ -105,6 +105,9 @@ class SendQueue:
                 "category": category,
                 "categoria": categoria,
                 "tipo_demanda": tipo_demanda,
+                # Necessária para revisitar o post depois e descobrir se ele
+                # ainda existe. Sem ela o revisor não tem como chegar ao post.
+                "url": url,
                 "published_at": published_at,
                 "enfileirada_em": agora.isoformat(),
             })

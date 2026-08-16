@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { listarVagas, linkTelegram, type Vaga } from '@/lib/metricas';
 import { FONTES, rotuloFonte, rotuloCategoria, rotuloTipoDemanda } from '@/lib/config';
-import { Selo, Nota, Vazio } from '@/components/ui';
+import { Selo, Nota, Vazio, Bolinha } from '@/components/ui';
 
 export const dynamic = 'force-dynamic';
 
@@ -125,6 +125,9 @@ export default async function Vagas({ searchParams }: { searchParams: Promise<Bu
               return (
                 <li key={`${v.uid}-${v.status}`} className="p-4">
                   <div className="flex items-start gap-2">
+                    {v.status === 'sent' && (
+                      <span className="mt-[7px] shrink-0"><Bolinha fechadaEm={v.closed_at} /></span>
+                    )}
                     {link ? (
                       <a href={link} target="_blank" rel="noopener noreferrer"
                          title="Abrir a mensagem no grupo do Telegram"
@@ -163,8 +166,8 @@ export default async function Vagas({ searchParams }: { searchParams: Promise<Bu
             <table className="w-full text-left border-collapse min-w-[720px]">
               <thead>
                 <tr className="border-b" style={{ borderColor: 'var(--borda)' }}>
-                  {['Nota', 'Demanda', 'Fonte', 'Situação', 'Quando'].map((h) => (
-                    <th key={h} className="rotulo font-semibold px-4 py-2.5">{h}</th>
+                  {['', 'Nota', 'Demanda', 'Fonte', 'Situação', 'Quando'].map((h, i) => (
+                    <th key={h || i} className="rotulo font-semibold px-4 py-2.5">{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -172,6 +175,13 @@ export default async function Vagas({ searchParams }: { searchParams: Promise<Bu
                 {r.linhas.map((v) => (
                   <tr key={`${v.uid}-${v.status}`} className="border-b last:border-0"
                       style={{ borderColor: 'var(--borda)' }}>
+                    <td className="pl-4 pr-1 py-3 align-top">
+                      {/* Só para demanda enviada: as outras nunca chegaram ao
+                          grupo, então não há mensagem cujo estado importe. */}
+                      {v.status === 'sent'
+                        ? <Bolinha fechadaEm={v.closed_at} />
+                        : null}
+                    </td>
                     <td className="px-4 py-3 align-top"><Nota valor={v.score} /></td>
                     <td className="px-4 py-3 align-top max-w-[400px]">
                       {(() => {

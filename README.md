@@ -94,6 +94,32 @@ nada; o que está escrito sempre ganha da presunção.
 > A conta usada no login precisa **já ser membro** do grupo. Grupo em que ela
 > não está devolve zero post, sem erro.
 
+## Quando o post some do Facebook
+
+A mensagem correspondente sai do grupo. O bot revisita os posts já publicados —
+alguns por ciclo, cada um no máximo uma vez por `RECHECK_HORAS` — e, quando a
+página responde que o conteúdo não existe mais, apaga a mensagem
+(`ACAO_VAGA_ENCERRADA=apagar`) ou a risca com um aviso (`marcar`).
+
+**Duas travas contra apagar mensagem boa**, e elas importam mais aqui do que
+importariam numa API:
+
+1. **Só a frase explícita conta.** Erro de rede, timeout, layout novo, sessão
+   morta — tudo devolve `desconhecida`. A diferença entre "o autor apagou o
+   post" e "o Facebook não carregou agora" é a diferença entre acertar e
+   destruir o feed do cliente.
+2. **São necessárias duas confirmações seguidas**, em checagens distintas. Se o
+   post voltar a responder no meio, o contador zera.
+
+> Ajuste de expectativa: isso rende menos no Facebook do que rendia num portal
+> de vagas. Portal tira o anúncio do ar quando a vaga é preenchida; quem posta
+> num grupo raramente volta para apagar depois de resolver. O que a verificação
+> pega de verdade é post apagado pelo autor, removido pelo moderador ou grupo
+> que fechou — não "a demanda já foi atendida".
+
+No painel isso é a bolinha ao lado de cada demanda enviada: verde = post no ar,
+vermelha = removido. Vermelho é raro, e é essa raridade que o torna informativo.
+
 ## Quando o classificador cai
 
 Aqui há uma inversão em relação a bots de vaga, e ela é deliberada.

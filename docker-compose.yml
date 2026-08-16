@@ -79,9 +79,13 @@ services:
       - SEND_WINDOW_END=${SEND_WINDOW_END:-23}
       - QUEUE_TTL_DAYS=${QUEUE_TTL_DAYS:-3}
       - MIN_SCORE=${MIN_SCORE:-0}
-      # Post de Facebook não sai do ar quando a demanda é atendida, então a
-      # revisão fica desligada. Ver o comentário em bot/vitality.py.
-      - ACAO_VAGA_ENCERRADA=${ACAO_VAGA_ENCERRADA:-nada}
+      # Post removido do Facebook: a mensagem correspondente sai do grupo.
+      # "apagar" | "marcar" | "nada". A verificação usa o navegador logado —
+      # ver FacebookSource.verificar_posts.
+      - ACAO_VAGA_ENCERRADA=${ACAO_VAGA_ENCERRADA:-apagar}
+      - RECHECK_HORAS=${RECHECK_HORAS:-24}
+      - RECHECK_POR_CICLO=${RECHECK_POR_CICLO:-8}
+      - RECHECK_DIAS=${RECHECK_DIAS:-30}
       # --- Regras de corte ---
       - REJEITAR_DIVULGACAO=${REJEITAR_DIVULGACAO:-true}
       - UFS_ATENDIDAS=${UFS_ATENDIDAS:-SP,RJ,SC,PR,RS,MG,BA,PE,DF,GO}

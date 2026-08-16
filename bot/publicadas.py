@@ -26,7 +26,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-log = logging.getLogger("av-jobs-bot.publicadas")
+log = logging.getLogger("adv-jobs-bot.publicadas")
 
 # Quantos 404 seguidos são necessários para dar a vaga como encerrada.
 CONFIRMACOES = 2
@@ -69,7 +69,7 @@ class RegistroPublicadas:
 
     def registrar(self, *, uid: str, source: str, source_id: str, title: str,
                   message_id: int | None, agora: datetime,
-                  html: str = "") -> None:
+                  html: str = "", url: str = "") -> None:
         if message_id is None:
             # Sem o id da mensagem não há o que apagar depois; acompanhar não
             # serviria para nada.
@@ -78,6 +78,10 @@ class RegistroPublicadas:
             self._itens[uid] = {
                 "source": source,
                 "source_id": source_id,
+                # A URL do post. No Facebook ela é indispensável: revisitar o
+                # post exige o permalink inteiro (grupo + id), e o `source_id`
+                # sozinho não permite remontá-lo.
+                "url": url,
                 "title": title,
                 # Guardado para poder riscar a mensagem original no lugar de
                 # apagá-la, se for essa a ação configurada.
@@ -91,7 +95,13 @@ class RegistroPublicadas:
             self._save_locked()
 
     def marcar_checada(self, uid: str, agora: datetime, achou_404: bool) -> bool:
-        """Anota o resultado. Devolve True quando a vaga passa a ser encerrada."""
+        """Anota o resultado. Devolve True quando a demanda passa a ser encerrada.
+
+        `achou_404` é o nome herdado de quando toda fonte era API. No Facebook o
+        equivalente é a página do post dizer "este conteúdo não está disponível";
+        o que importa é o contrato: só evidência EXPLÍCITA de que o post sumiu
+        conta como falta. Qualquer dúvida entra como False e zera o contador.
+        """
         with self._lock:
             item = self._itens.get(uid)
             if not item:

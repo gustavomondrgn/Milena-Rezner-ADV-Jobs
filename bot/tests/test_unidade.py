@@ -177,6 +177,43 @@ check("arquivo inexistente devolve vazio",
       facebook.carregar_grupos(Path(_TMP) / "nao-existe.txt"), [])
 
 # ---------------------------------------------------------------------------
+secao("POST REMOVIDO — o detector que autoriza apagar mensagem do grupo")
+# ---------------------------------------------------------------------------
+
+# Falso positivo aqui não custa uma vaga: custa APAGAR uma demanda boa do grupo
+# do cliente. Por isso o padrão é literal e curto, e tudo que não casar
+# explicitamente vira "desconhecida" lá em `_estado_do_post`.
+
+
+def sumiu(texto):
+    return bool(facebook._POST_SUMIU.search(facebook._sem_acento(texto)))
+
+
+check("PT: conteúdo indisponível",
+      sumiu("Este conteúdo não está disponível no momento"), True)
+check("PT: página indisponível",
+      sumiu("Esta página não está disponível"), True)
+check("PT: link quebrado",
+      sumiu("O link que você seguiu pode estar quebrado"), True)
+check("EN: content isn't available",
+      sumiu("This content isn't available right now"), True)
+check("EN: content isnt available (sem apóstrofo)",
+      sumiu("This content isnt available right now"), True)
+
+# Os casos que NÃO podem disparar. Cada um destes é uma mensagem que seria
+# apagada por engano do grupo da cliente.
+check("post normal não dispara",
+      sumiu("Preciso de advogado para usucapiao em Santos, alguem indica?"), False)
+check("vídeo indisponível DENTRO de post no ar",
+      sumiu("Olha esse caso absurdo\nVídeo indisponível\nPreciso de um parecer"),
+      False)
+check("a palavra 'indisponível' sozinha não basta",
+      sumiu("O imóvel está indisponível para visita até segunda"), False)
+check("'não encontrado' fora de contexto",
+      sumiu("O processo não encontrado no PJe, alguém sabe o que houve?"), False)
+check("texto vazio", sumiu(""), False)
+
+# ---------------------------------------------------------------------------
 secao("REGRA DE LOCAL — só morde quando exige presença")
 # ---------------------------------------------------------------------------
 

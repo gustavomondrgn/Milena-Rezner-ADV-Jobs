@@ -191,15 +191,21 @@ QUEUE_TTL_DAYS = int(os.getenv("QUEUE_TTL_DAYS", "3"))
 MIN_SCORE = int(os.getenv("MIN_SCORE", "0"))
 
 # --- Demanda encerrada -----------------------------------------------------
-# Herdado do projeto anterior, onde as plataformas devolviam 404 quando a vaga
-# saía do ar. **No Facebook isso não existe:** um post continua no ar depois de
-# a pessoa já ter contratado alguém, e verificar exigiria subir o navegador de
-# novo para cada post publicado. Por isso o padrão aqui é "nada" — o bot nem
-# entra no laço de revisão. O código fica: se um dia entrar uma fonte com API
-# (Gupy, LinkedIn), basta mudar esta variável para "apagar" e ele volta a valer.
-ACAO_VAGA_ENCERRADA = os.getenv("ACAO_VAGA_ENCERRADA", "nada").strip().lower()
+# O que fazer quando o post some do Facebook: "apagar" remove a mensagem do
+# grupo (padrão), "marcar" a mantém riscada com um aviso, "nada" desliga a
+# revisão inteira.
+#
+# Vale a ressalva de expectativa: no Facebook isso rende menos do que rendia num
+# portal de vagas. Portal tira o anúncio do ar quando a vaga é preenchida; já
+# quem posta num grupo raramente volta para apagar depois de resolver. O que
+# esta verificação pega de verdade é post removido pelo moderador, post apagado
+# pelo autor e grupo que fechou — não "a demanda já foi atendida".
+ACAO_VAGA_ENCERRADA = os.getenv("ACAO_VAGA_ENCERRADA", "apagar").strip().lower()
 RECHECK_HORAS = int(os.getenv("RECHECK_HORAS", "24"))
-RECHECK_POR_CICLO = int(os.getenv("RECHECK_POR_CICLO", "12"))
+# Baixo de propósito: no Facebook cada verificação é uma página carregada num
+# navegador, não uma requisição de API. Oito por ciclo de 10 min dá ~48/hora,
+# folgado para reexaminar a cada 24h tudo que foi publicado num mês.
+RECHECK_POR_CICLO = int(os.getenv("RECHECK_POR_CICLO", "8"))
 RECHECK_DIAS = int(os.getenv("RECHECK_DIAS", "30"))
 
 # --- Regras de corte -------------------------------------------------------
@@ -1143,7 +1149,7 @@ def marcar_mensagem_encerrada(message_id: int, html_original: str) -> bool:
     aconteceu, em vez de achar que a mensagem sumiu do nada. O texto original
     fica riscado, então o histórico do grupo continua fazendo sentido.
     """
-    aviso = "🔴 <b>VAGA ENCERRADA</b> — não está mais disponível na plataforma"
+    aviso = "🔴 <b>POST REMOVIDO</b> — não está mais disponível no Facebook"
     corpo = f"{aviso}\n\n<s>{_sem_tags(html_original)}</s>"
     try:
         r = requests.post(
@@ -1585,6 +1591,7 @@ def _despachar_um(cfg: dict[str, Any]) -> bool:
         uid=item["uid"], source=item.get("source", ""),
         source_id=item["uid"].split(":", 1)[-1], title=item.get("title", ""),
         message_id=message_id, agora=agora, html=item.get("html", ""),
+        url=item.get("url", ""),
     )
     log.info("Publicada %s (nota %s) — %s",
              item["uid"], item.get("score"), item.get("title", "")[:70])
@@ -1610,12 +1617,16 @@ def _despachar_um(cfg: dict[str, Any]) -> bool:
 # ---------------------------------------------------------------------------
 
 def revisar(fontes: list[Any], cfg: dict[str, Any]) -> None:
-    """Reexamina algumas vagas já publicadas e trata as que saíram do ar.
+    """Reexamina alguns posts já publicados e trata os que saíram do ar.
 
-    Roda a conta-gotas — algumas por ciclo, cada vaga no máximo uma vez por
-    `recheck_horas` — para não transformar a verificação num segundo scraping.
-    Com 8 publicações por dia e 30 dias de acompanhamento são ~240 vagas; a 12
-    por ciclo de 10 min, cada uma é revista com folga dentro do intervalo.
+    Roda a conta-gotas — alguns por ciclo, cada post no máximo uma vez por
+    `recheck_horas`. No Facebook isso é mais caro que numa API: cada verificação
+    é uma página carregada num navegador. O barateamento vem de duas coisas —
+    um único navegador para o lote inteiro, e `a_checar` devolver lista vazia
+    quando nada venceu, o que faz o navegador nem subir na maioria dos ciclos.
+
+    O revisor **nunca** apaga por conta própria. Ele coleta evidência; quem
+    decide é `publicadas.marcar_checada`, que exige duas confirmações seguidas.
     """
     agora = agora_local()
     acao = str(cfg.get("acao_vaga_encerrada") or ACAO_VAGA_ENCERRADA).lower()
@@ -1630,6 +1641,17 @@ def revisar(fontes: list[Any], cfg: dict[str, Any]) -> None:
     if not pendentes:
         return
 
+    # O Facebook não tem endpoint de detalhe: quem sabe dizer se o post ainda
+    # existe é a própria fonte, com o navegador logado. Por isso ele é resolvido
+    # aqui e não em `vitality.py`, que só fala HTTP.
+    fonte_fb = next((f for f in fontes if f.name == "facebook"), None)
+    itens_fb = [i for i in pendentes if i["source"] == "facebook"]
+    estados_fb: dict[str, str] = {}
+    if itens_fb and fonte_fb is not None:
+        estados_fb = fonte_fb.verificar_posts(
+            {i["uid"]: i.get("url", "") for i in itens_fb}
+        )
+
     # O Indeed aceita várias chaves por requisição; as do lote são resolvidas de
     # uma vez só, o que derruba o custo dessa fonte a quase nada.
     chaves_indeed = [i["source_id"] for i in pendentes if i["source"] == "indeed"]
@@ -1637,7 +1659,9 @@ def revisar(fontes: list[Any], cfg: dict[str, Any]) -> None:
 
     encerradas = 0
     for item in pendentes:
-        if item["source"] == "indeed":
+        if item["source"] == "facebook":
+            estado = estados_fb.get(item["uid"], "desconhecida")
+        elif item["source"] == "indeed":
             estado = estados_indeed.get(item["source_id"], "desconhecida")
         else:
             estado = vitality.verificar(item["source"], item["source_id"])
@@ -1809,6 +1833,7 @@ def check_new_jobs(fontes: list[Any], seen_uids: set[str], seen_keys: set[str],
             category=category,
             categoria=analysis.get("categoria", ""),
             tipo_demanda=analysis.get("tipo_demanda", ""),
+            url=job.url,
             published_at=job.published_at,
             agora=agora,
         )
@@ -1906,12 +1931,12 @@ def main() -> None:
     log.info("Relatório diário às %dh (%s), destino: %s",
              REPORT_HOUR, TIMEZONE_NAME, REPORT_TO)
     if ACAO_VAGA_ENCERRADA == "nada":
-        log.info("Revisão de demandas encerradas: desligada "
-                 "(post de Facebook não sai do ar quando a demanda é atendida)")
+        log.info("Revisão de posts removidos: desligada")
     else:
-        log.info("Demanda encerrada na fonte: ação=%s · rechecagem a cada %dh · "
-                 "acompanhando por %d dias",
-                 ACAO_VAGA_ENCERRADA, RECHECK_HORAS, RECHECK_DIAS)
+        log.info("Post removido na origem: ação=%s · rechecagem a cada %dh · "
+                 "%d por ciclo · acompanhando por %d dias",
+                 ACAO_VAGA_ENCERRADA, RECHECK_HORAS, RECHECK_POR_CICLO,
+                 RECHECK_DIAS)
 
     while True:
         cfg = config_atual()

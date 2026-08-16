@@ -4,7 +4,7 @@ import { kpis, serieDiaria, porArea, porTipo, motivosRecusa, listarVagas,
 import { lerConfig, rotuloCategoria, rotuloTipoDemanda, rotuloFonte } from '@/lib/config';
 import { BarrasHorizontais } from '@/components/Graficos';
 import { GraficoDiario } from '@/components/GraficoDiario';
-import { Cartao, Metrica, Variacao, Nota, Vazio, ROTULOS_STATUS }
+import { Cartao, Metrica, Variacao, Nota, Vazio, Bolinha, ROTULOS_STATUS }
   from '@/components/ui';
 
 // O painel mostra o estado de agora; cache de página aqui só serviria para
@@ -155,6 +155,7 @@ export default async function VisaoGeral() {
               {ultimas.linhas.map((v) => (
                 <li key={`${v.uid}-${v.status}`}
                     className="py-2.5 first:pt-0 last:pb-0 flex items-center gap-2.5 sm:gap-3">
+                  <Bolinha fechadaEm={v.closed_at} />
                   <Nota valor={v.score} />
                   <div className="min-w-0 flex-1">
                     <TituloVaga

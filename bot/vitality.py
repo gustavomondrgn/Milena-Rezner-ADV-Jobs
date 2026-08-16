@@ -46,11 +46,14 @@ LINKEDIN_DETALHE = "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{}"
 INDEED_GRAPHQL = "https://apis.indeed.com/graphql"
 INDEED_LOTE = 12
 
-# O Facebook não entra nesta brincadeira. Um post continua exatamente no ar
-# depois de a pessoa já ter contratado alguém — não existe 404 de "demanda
-# atendida". E verificar exigiria subir o navegador de novo para cada post
-# publicado, que é caro e não responde a pergunta. Por isso ele fica de fora, e
-# com `ACAO_VAGA_ENCERRADA=nada` (o padrão deste projeto) o revisor nem roda.
+# O Facebook fica fora DESTE módulo, mas não fica sem verificação.
+#
+# A diferença é o meio: aqui só se fala HTTP, e a página de um post do Facebook
+# em HTTP puro é um esqueleto sem conteúdo. Quem sabe responder é o navegador
+# logado — então quem verifica post é `FacebookSource.verificar_posts`, chamado
+# direto por `main.revisar`. Se alguém apagar esta entrada achando que está
+# "religando" a verificação do Facebook, vai conseguir o oposto: um `_classificar`
+# rodando sobre HTML de login e devolvendo lixo.
 SEM_VERIFICACAO: frozenset[str] = frozenset({"facebook"})
 
 

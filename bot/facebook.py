@@ -316,6 +316,26 @@ _SINAIS_LOGIN = (
     "login", "checkpoint", "/recover", "confirmemail",
 )
 
+# O que o Facebook escreve quando o post não existe mais — apagado pelo autor,
+# removido pelo moderador, ou grupo fechado. Comparado SEM acento, porque o
+# texto é normalizado antes.
+#
+# A lista é curta e literal de propósito: é ela que autoriza apagar uma mensagem
+# do grupo do cliente. Uma expressão frouxa aqui (um "indisponivel" solto, por
+# exemplo) casaria com aviso de vídeo indisponível dentro de um post que está
+# perfeitamente no ar.
+_POST_SUMIU = re.compile(
+    r"este conteudo nao esta disponivel no momento|"
+    r"esse conteudo nao esta disponivel no momento|"
+    r"this content isn'?t available (?:right now|at the moment)|"
+    r"conteudo nao encontrado|"
+    r"esta pagina nao esta disponivel|"
+    r"this page isn'?t available|"
+    r"o link que voce seguiu pode estar quebrado|"
+    r"the link you followed may be broken",
+    re.I,
+)
+
 
 class FacebookSource(BaseSource):
     """Lê os grupos configurados com um navegador logado."""
@@ -495,6 +515,109 @@ class FacebookSource(BaseSource):
         log.info("Facebook: %s rendeu %d post(s) aproveitável(is)",
                  grupo.rotulo, len(jobs))
         return jobs
+
+    # -- o post ainda existe? -----------------------------------------------
+
+    def verificar_posts(self, urls: dict[str, str]) -> dict[str, str]:
+        """Recebe {uid: url} e devolve {uid: "aberta"|"fechada"|"desconhecida"}.
+
+        **Regra de ouro, igual à do resto do projeto: na dúvida, está aberta.**
+        Só a frase explícita de conteúdo indisponível conta como fechada. Erro
+        de rede, timeout, sessão morta, layout novo — tudo devolve
+        "desconhecida", porque a diferença entre "o autor apagou o post" e "o
+        Facebook não carregou agora" é a diferença entre apagar a mensagem certa
+        e apagar uma demanda boa do grupo do cliente.
+
+        Some a isso a trava de `publicadas.py`: são precisas DUAS confirmações
+        em checagens distintas. Um soluço não derruba nada.
+
+        Custo: uma página por post. É caro comparado a uma API — por isso o
+        `RECHECK_POR_CICLO` é baixo e cada post é revisto no máximo uma vez por
+        `RECHECK_HORAS`.
+        """
+        if not urls:
+            return {}
+        if not self.state_file.exists():
+            log.warning("Sem sessão do Facebook — revisão de posts adiada")
+            return {uid: "desconhecida" for uid in urls}
+
+        try:
+            from playwright.sync_api import sync_playwright  # noqa: PLC0415
+        except ImportError:
+            return {uid: "desconhecida" for uid in urls}
+
+        resultado: dict[str, str] = {}
+        with sync_playwright() as pw:
+            navegador = pw.chromium.launch(
+                headless=self.headless,
+                args=["--disable-blink-features=AutomationControlled",
+                      "--no-sandbox", "--disable-dev-shm-usage"],
+            )
+            contexto = navegador.new_context(
+                storage_state=str(self.state_file),
+                locale="pt-BR",
+                timezone_id="America/Sao_Paulo",
+                viewport={"width": 1366, "height": 900},
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+                ),
+            )
+            contexto.add_init_script(
+                "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
+            )
+            pagina = contexto.new_page()
+
+            for i, (uid, url) in enumerate(urls.items()):
+                if i:
+                    time.sleep(random.uniform(1.5, 3.5))
+                resultado[uid] = self._estado_do_post(pagina, url)
+
+            try:
+                contexto.storage_state(path=str(self.state_file))
+            except Exception:  # noqa: BLE001
+                pass
+            contexto.close()
+            navegador.close()
+
+        fechadas = sum(1 for e in resultado.values() if e == "fechada")
+        log.info("Revisão de posts: %d checado(s), %d sem conteúdo, %d inconclusivo(s)",
+                 len(resultado), fechadas,
+                 sum(1 for e in resultado.values() if e == "desconhecida"))
+        return resultado
+
+    def _estado_do_post(self, pagina: Any, url: str) -> str:
+        if not url:
+            return "desconhecida"
+        try:
+            pagina.goto(url, wait_until="domcontentloaded", timeout=45_000)
+            pagina.wait_for_timeout(1500)
+        except Exception as exc:  # noqa: BLE001
+            log.debug("Falha abrindo %s: %s", url, exc)
+            return "desconhecida"
+
+        # Sessão morta devolve a página de login, que obviamente não tem o post.
+        # Tratar isso como "post apagado" apagaria o grupo inteiro em um dia.
+        if any(s in (pagina.url or "").lower() for s in _SINAIS_LOGIN):
+            log.warning("Revisão interrompida: a sessão do Facebook expirou")
+            return "desconhecida"
+
+        try:
+            texto = (pagina.inner_text("body") or "")[:4000]
+        except Exception:  # noqa: BLE001
+            return "desconhecida"
+
+        if _POST_SUMIU.search(_sem_acento(texto)):
+            return "fechada"
+
+        # O post continua lá se o card ainda renderiza. Se nem card nem frase de
+        # erro apareceram, é caso indeterminado — e indeterminado é "aberta".
+        try:
+            if pagina.locator('div[role="article"]').count() > 0:
+                return "aberta"
+        except Exception:  # noqa: BLE001
+            pass
+        return "desconhecida"
 
     @staticmethod
     def _expandir(pagina: Any) -> None:
