@@ -787,6 +787,40 @@ class FacebookSource(BaseSource):
             return False
 
     @staticmethod
+    def _tentar_continuar(pagina: Any) -> bool:
+        """A tela "Continuar como Fulano" — um clique, e a sessao volta.
+
+        Nao e sessao morta: o Facebook RECONHECE os cookies, mostra a foto e o
+        nome da conta e so pede confirmacao. Aparece depois de o acesso mudar de
+        lugar, que e exatamente o caso de um bot que roda num servidor.
+
+        Tratar essa tela como "sessao expirou" foi o erro mais caro deste dia:
+        levou a refazer login, e refazer login de datacenter e o que dispara o
+        CAPTCHA da Arkose — um muro que nao existia no caminho real.
+        """
+        seletores = (
+            'div[role="button"]:has-text("Continuar")',
+            'button:has-text("Continuar")',
+            'a[role="button"]:has-text("Continuar")',
+            'div[role="button"]:has-text("Continue")',
+            'button:has-text("Continue")',
+        )
+        for seletor in seletores:
+            try:
+                alvo = pagina.locator(seletor)
+                if not alvo.count():
+                    continue
+                alvo.first.click(timeout=8000)
+                pagina.wait_for_load_state("domcontentloaded", timeout=30_000)
+                pagina.wait_for_timeout(4000)
+                log.info("Tela de continuacao resolvida com %s — agora em %s",
+                         seletor, pagina.url)
+                return True
+            except Exception:  # noqa: BLE001
+                continue
+        return False
+
+    @staticmethod
     def _pede_so_a_senha(pagina: Any) -> bool:
         """A tela "Insira sua senha para continuar": senha sem e-mail."""
         try:
@@ -935,6 +969,17 @@ class FacebookSource(BaseSource):
         pagina.goto(grupo.url, wait_until="domcontentloaded", timeout=60_000)
 
         url_atual = (pagina.url or "").lower()
+        if any(s in url_atual for s in _SINAIS_LOGIN):
+            # Antes de declarar a sessao morta: pode ser so a tela de
+            # continuacao, que se resolve com um clique e sem credencial
+            # nenhuma. Vale a pena tentar — o caminho alternativo (refazer
+            # login) e o que esbarra em CAPTCHA.
+            if self._tentar_continuar(pagina):
+                if grupo.url.split("?")[0] not in (pagina.url or ""):
+                    pagina.goto(grupo.url, wait_until="domcontentloaded",
+                                timeout=60_000)
+                url_atual = (pagina.url or "").lower()
+
         if any(s in url_atual for s in _SINAIS_LOGIN):
             # Fotografa ANTES de levantar o erro. "A sessao caiu" e uma frase
             # que serve para tres coisas diferentes — pagina de login, pedido de
@@ -1109,6 +1154,13 @@ class FacebookSource(BaseSource):
 
         # Sessão morta devolve a página de login, que obviamente não tem o post.
         # Tratar isso como "post apagado" apagaria o grupo inteiro em um dia.
+        if any(s in (pagina.url or "").lower() for s in _SINAIS_LOGIN):
+            # Mesma tela de continuação da coleta: um clique e a sessão volta.
+            if self._tentar_continuar(pagina):
+                try:
+                    pagina.goto(url, wait_until="domcontentloaded", timeout=45_000)
+                except Exception:  # noqa: BLE001
+                    return "desconhecida"
         if any(s in (pagina.url or "").lower() for s in _SINAIS_LOGIN):
             log.warning("Revisão interrompida: a sessão do Facebook expirou")
             return "desconhecida"
