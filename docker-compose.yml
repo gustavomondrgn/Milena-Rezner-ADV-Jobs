@@ -190,41 +190,17 @@ services:
     expose:
       - "3000"
 
-  # Estacao de login: um navegador COM TELA dentro do servidor, alcancavel pelo
-  # browser. Existe porque a sessao do Facebook nao viaja de IP — criada em
-  # casa e apresentada de um datacenter, ela cai na tela de confirmacao, e
-  # insistir com login novo dali leva ao CAPTCHA da Arkose. Aqui a sessao nasce
-  # no IP certo, com uma pessoa resolvendo os desafios com o mouse.
+  # A ESTACAO DE LOGIN NAO MORA MAIS AQUI — de proposito.
   #
-  # FICA DESLIGADA: sem VNC_PASSWORD o container sai no primeiro segundo e nao
-  # reinicia. Para usar: preencher VNC_PASSWORD e LOGIN_DOMAIN, redeployar,
-  # fazer o login, e APAGAR a VNC_PASSWORD depois. Um navegador logado exposto
-  # na internet nao se deixa aceso sem motivo.
-  fb-login:
-    build:
-      context: .
-      dockerfile: bot/Dockerfile.login
-    container_name: adv-jobs-fb-login
-    restart: "no"
-    labels:
-      - traefik.enable=true
-      - traefik.docker.network=coolify
-      - traefik.http.routers.advlogin.entrypoints=https
-      - traefik.http.routers.advlogin.rule=Host(`${LOGIN_DOMAIN:-login.localhost}`)
-      - traefik.http.routers.advlogin.tls=true
-      - traefik.http.routers.advlogin.tls.certresolver=letsencrypt
-      - traefik.http.routers.advlogin.service=advlogin
-      - traefik.http.services.advlogin.loadbalancer.server.port=8080
-    environment:
-      - VNC_PASSWORD=${VNC_PASSWORD:-}
-      - FB_EMAIL=${FB_EMAIL:-}
-      - FB_PASSWORD=${FB_PASSWORD:-}
-      - DATA_DIR=/app/data
-    volumes:
-      # O MESMO volume do bot: a sessao gravada aqui e a que ele le.
-      - bot-data:/app/data
-    expose:
-      - "8080"
+  # Ela existe em `bot/Dockerfile.login` + `bot/entrada-login.sh` e resolve um
+  # problema real (a sessao do Facebook precisa nascer no IP do servidor), mas
+  # deixa-la declarada no compose custa caro: o Coolify RECONSTROI a imagem a
+  # cada deploy, e ela traz um Chromium inteiro. Numa VPS de 4 GB isso derrubou
+  # o servidor junto com o painel e o proprio Coolify.
+  #
+  # Para usar de novo (troca de conta do Facebook, por exemplo): descomentar o
+  # servico com o conteudo de `docs/estacao-de-login.md`, preencher
+  # VNC_PASSWORD e LOGIN_DOMAIN, deployar, fazer o login, e remover outra vez.
 
 volumes:
   bot-data:
