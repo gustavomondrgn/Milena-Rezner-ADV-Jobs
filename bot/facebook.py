@@ -587,6 +587,10 @@ class FacebookSource(BaseSource):
             contexto.add_init_script(
                 "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
             )
+            # Que sessao e esta, afinal? Sem isto, "a sessao caiu" nao distingue
+            # arquivo velho, arquivo sem o cookie de sessao (`xs`) e sessao
+            # completa sendo recusada — e cada um desses tem conserto diferente.
+            self._anotar_sessao(contexto)
             pagina = contexto.new_page()
             try:
                 return self._fluxo_de_login(pagina, contexto, email, senha,
@@ -602,6 +606,25 @@ class FacebookSource(BaseSource):
                     navegador.close()
                 except Exception:  # noqa: BLE001
                     pass
+
+    def _anotar_sessao(self, contexto: Any) -> None:
+        try:
+            nomes = sorted({c["name"] for c in contexto.cookies()})
+        except Exception:  # noqa: BLE001
+            nomes = []
+        try:
+            idade_h = (time.time() - self.state_file.stat().st_mtime) / 3600
+            tamanho = self.state_file.stat().st_size
+        except OSError:
+            idade_h, tamanho = -1, 0
+        self._sessao_em_uso = {
+            "cookies": ",".join(nomes),
+            "tem_xs": "xs" in nomes,
+            "tem_c_user": "c_user" in nomes,
+            "gravada_ha_h": round(idade_h, 1),
+            "bytes": tamanho,
+        }
+        log.info("Sessao em uso: %s", self._sessao_em_uso)
 
     def _anotar_fase(self, pagina: Any, nome: str) -> None:
         try:
@@ -998,8 +1021,11 @@ class FacebookSource(BaseSource):
             # continuacao, que se resolve com um clique e sem credencial
             # nenhuma. Vale a pena tentar — o caminho alternativo (refazer
             # login) e o que esbarra em CAPTCHA.
-            self.ultimo_diagnostico = {"fases": [
-                {"fase": "coleta", "url": pagina.url, "titulo": grupo.rotulo}]}
+            self.ultimo_diagnostico = {
+                "fases": [{"fase": "coleta", "url": pagina.url,
+                           "titulo": grupo.rotulo}],
+                "sessao": getattr(self, "_sessao_em_uso", {}),
+            }
             if self._tentar_continuar(pagina):
                 if grupo.url.split("?")[0] not in (pagina.url or ""):
                     pagina.goto(grupo.url, wait_until="domcontentloaded",
