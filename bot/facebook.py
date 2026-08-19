@@ -1019,6 +1019,7 @@ class FacebookSource(BaseSource):
             ) from exc
 
         jobs: list[Job] = []
+        falhas_de_sessao: list[tuple[str, Exception]] = []
         with sync_playwright() as pw:
             navegador, contexto = self._abrir(pw)
             pagina = contexto.new_page()
@@ -1031,8 +1032,16 @@ class FacebookSource(BaseSource):
                         time.sleep(random.uniform(3.0, 7.0))
                     try:
                         jobs.extend(self._ler_grupo(pagina, grupo))
-                    except AuthError:
-                        raise
+                    except AuthError as exc:
+                        # UM grupo devolvendo pagina de login nao prova que a
+                        # sessao morreu — pode ser grupo que a conta perdeu
+                        # acesso, ou que exige confirmacao so ele. Antes isto
+                        # abortava a coleta inteira e jogava fora os posts dos
+                        # grupos ja lidos: oito grupos bons perdidos por causa
+                        # do nono. O veredito sobre a sessao fica para o fim.
+                        log.warning("Grupo %s caiu em pagina de login: %s",
+                                    grupo.rotulo, exc)
+                        falhas_de_sessao.append((grupo.rotulo, exc))
                     except Exception as exc:  # noqa: BLE001
                         log.warning("Grupo %s falhou: %s — seguindo para o próximo",
                                     grupo.rotulo, exc)
@@ -1044,6 +1053,15 @@ class FacebookSource(BaseSource):
                 except Exception as exc:  # noqa: BLE001
                     log.debug("Não consegui regravar a sessão: %s", exc)
                 self._fechar(navegador, contexto)
+
+        if falhas_de_sessao and not jobs:
+            # Nenhum grupo rendeu nada E houve pagina de login: agora sim a
+            # sessao e o problema, e o alerta faz sentido.
+            raise falhas_de_sessao[0][1]
+        if falhas_de_sessao:
+            log.warning("%d de %d grupo(s) pediram login e ficaram de fora "
+                        "deste ciclo: %s", len(falhas_de_sessao), len(grupos),
+                        ", ".join(rotulo for rotulo, _ in falhas_de_sessao))
 
         return jobs
 
