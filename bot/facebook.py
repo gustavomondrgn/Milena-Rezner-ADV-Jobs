@@ -786,8 +786,28 @@ class FacebookSource(BaseSource):
             log.error("Nao consegui enviar o formulario: %s", exc)
             return False
 
-    @staticmethod
-    def _tentar_continuar(pagina: Any) -> bool:
+    _CLICAR_CONTINUAR_JS = """
+() => {
+  const alvos = Array.from(document.querySelectorAll(
+    'a, button, input[type=submit], [role=button], div[tabindex]'));
+  const rotulo = (e) =>
+    ((e.innerText || e.value || e.getAttribute('aria-label') || '')
+      .trim().toLowerCase());
+  const querem = alvos.filter((e) => {
+    const t = rotulo(e);
+    return t === 'continuar' || t === 'continue' ||
+           t.startsWith('continuar como') || t.startsWith('continue as');
+  });
+  if (!querem.length) return '';
+  // O mais interno: em telas do Facebook o texto costuma estar num filho, e
+  // clicar no ancestral gigante as vezes nao dispara o handler certo.
+  const alvo = querem[querem.length - 1];
+  alvo.click();
+  return rotulo(alvo) || 'continuar';
+}
+"""
+
+    def _tentar_continuar(self, pagina: Any) -> bool:
         """A tela "Continuar como Fulano" — um clique, e a sessao volta.
 
         Nao e sessao morta: o Facebook RECONHECE os cookies, mostra a foto e o
@@ -797,28 +817,32 @@ class FacebookSource(BaseSource):
         Tratar essa tela como "sessao expirou" foi o erro mais caro deste dia:
         levou a refazer login, e refazer login de datacenter e o que dispara o
         CAPTCHA da Arkose — um muro que nao existia no caminho real.
+
+        O clique vai por JavaScript, varrendo a pagina por qualquer elemento
+        clicavel rotulado "Continuar", porque seletor de Facebook nao dura: a
+        primeira versao usava `div[role=button]:has-text(...)` e nao achou nada
+        numa tela que tinha o botao bem no meio.
         """
-        seletores = (
-            'div[role="button"]:has-text("Continuar")',
-            'button:has-text("Continuar")',
-            'a[role="button"]:has-text("Continuar")',
-            'div[role="button"]:has-text("Continue")',
-            'button:has-text("Continue")',
-        )
-        for seletor in seletores:
-            try:
-                alvo = pagina.locator(seletor)
-                if not alvo.count():
-                    continue
-                alvo.first.click(timeout=8000)
-                pagina.wait_for_load_state("domcontentloaded", timeout=30_000)
-                pagina.wait_for_timeout(4000)
-                log.info("Tela de continuacao resolvida com %s — agora em %s",
-                         seletor, pagina.url)
-                return True
-            except Exception:  # noqa: BLE001
-                continue
-        return False
+        try:
+            rotulo = pagina.evaluate(self._CLICAR_CONTINUAR_JS)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Falha procurando o botao Continuar: %s", exc)
+            self.ultimo_diagnostico["continuar"] = f"erro: {exc}"
+            return False
+
+        if not rotulo:
+            log.info("Tela de continuacao: nenhum botao 'Continuar' encontrado.")
+            self.ultimo_diagnostico["continuar"] = "botao nao encontrado"
+            return False
+
+        try:
+            pagina.wait_for_load_state("domcontentloaded", timeout=30_000)
+        except Exception:  # noqa: BLE001
+            pass
+        pagina.wait_for_timeout(5000)
+        self.ultimo_diagnostico["continuar"] = f"cliquei em '{rotulo}'"
+        log.info("Cliquei em '%s' — agora em %s", rotulo, pagina.url)
+        return True
 
     @staticmethod
     def _pede_so_a_senha(pagina: Any) -> bool:
@@ -974,6 +998,8 @@ class FacebookSource(BaseSource):
             # continuacao, que se resolve com um clique e sem credencial
             # nenhuma. Vale a pena tentar — o caminho alternativo (refazer
             # login) e o que esbarra em CAPTCHA.
+            self.ultimo_diagnostico = {"fases": [
+                {"fase": "coleta", "url": pagina.url, "titulo": grupo.rotulo}]}
             if self._tentar_continuar(pagina):
                 if grupo.url.split("?")[0] not in (pagina.url or ""):
                     pagina.goto(grupo.url, wait_until="domcontentloaded",
@@ -984,8 +1010,8 @@ class FacebookSource(BaseSource):
             # Fotografa ANTES de levantar o erro. "A sessao caiu" e uma frase
             # que serve para tres coisas diferentes — pagina de login, pedido de
             # senha de novo, CAPTCHA — e so a tela diz qual delas e.
-            self.ultimo_diagnostico = {"fases": [
-                {"fase": "coleta", "url": pagina.url, "titulo": grupo.rotulo}]}
+            self.ultimo_diagnostico.setdefault("fases", []).append(
+                {"fase": "desistiu", "url": pagina.url, "titulo": grupo.rotulo})
             self._fotografar(pagina)
             raise AuthError(
                 f"Facebook redirecionou para {pagina.url} — a sessão expirou ou "

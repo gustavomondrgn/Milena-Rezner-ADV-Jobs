@@ -1705,7 +1705,10 @@ def coletar(fontes: list[Any], cfg: dict[str, Any]) -> tuple[list[Job], set[str]
                 _PRIMEIRA_COLETA_REPORTADA.add(fonte.name)
                 diag_coleta = getattr(fonte, "ultimo_diagnostico", None) or {}
                 legenda = ("🛠 <b>A coleta bateu em pagina de login</b>\n\n"
-                           f"{html.escape(str(exc))[:400]}")
+                           f"{html.escape(str(exc))[:300]}")
+                if diag_coleta.get("continuar"):
+                    legenda += ("\n\nTela de continuacao: "
+                                f"{html.escape(str(diag_coleta['continuar']))[:120]}")
                 if diag_coleta.get("texto"):
                     legenda += ("\n\nTexto da tela: "
                                 f"{html.escape(diag_coleta['texto'])[:250]}")
