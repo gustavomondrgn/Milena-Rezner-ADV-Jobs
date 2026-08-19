@@ -23,9 +23,15 @@ RUN playwright install --with-deps chromium && \
     rm -rf /var/lib/apt/lists/*
 
 # Código do bot.
-COPY bot/main.py bot/sources.py bot/facebook.py bot/bot_control.py \
-     bot/filters.py bot/dispatch.py bot/telemetry.py bot/store.py \
-     bot/vitality.py bot/publicadas.py ./
+#
+# Curinga, e nao a lista de arquivos que estava aqui antes. A lista custou uma
+# manha de producao: um modulo novo (relogin.py) entrou no repositorio, nao
+# entrou na lista, e a imagem subiu sem ele. O bot quebrava no import e
+# reiniciava em laco: sem Telegram, sem coleta, e com tudo parecendo no ar do
+# lado de fora.
+#
+# bot/*.py nao pega tools/ nem tests/: sao subpastas, e o curinga nao desce.
+COPY bot/*.py ./
 
 # Configuração do filtro: profile.md, lista de grupos e termos de busca.
 # `main.py` resolve os caminhos a partir de `<pasta do main>/config/` — mexer
