@@ -590,6 +590,60 @@ main.DATA_DIR, main.FACEBOOK_STATE_FILE, main.FACEBOOK_STATE_B64 = (
 
 
 # ---------------------------------------------------------------------------
+secao("RENOVAÇÃO DA SESSÃO — código de dois fatores")
+# ---------------------------------------------------------------------------
+# Quando a sessão cai, o bot refaz o login no próprio servidor e pode precisar
+# do código de dois fatores. Duas coisas aqui erram calado: aceitar QUALQUER
+# número como código (o Facebook endurece o checkpoint a cada código errado) e
+# aceitar código fora da janela de espera, quando ninguém vai consumi-lo.
+
+import relogin  # noqa: E402
+
+check("aceita o comando com o código",
+      relogin.extrair_codigo("/codigo 123456"), "123456")
+check("aceita o código solto", relogin.extrair_codigo("123456"), "123456")
+check("aceita o código com espaço, do jeito que o autenticador mostra",
+      relogin.extrair_codigo("123 456"), "123456")
+check("aceita código no meio da frase",
+      relogin.extrair_codigo("o codigo e 654321 ok"), "654321")
+check("comando sem número não vira código",
+      relogin.extrair_codigo("/codigo"), None)
+check("texto sem número não vira código",
+      relogin.extrair_codigo("caiu de novo?"), None)
+check("número curto demais não passa", relogin.extrair_codigo("1234"), None)
+
+# TOTP: vetores conhecidos do segredo de exemplo (RFC 6238, SHA-1, passo 30s).
+check("TOTP no instante 0", relogin.codigo_totp("JBSWY3DPEHPK3PXP", 0), "282760")
+check("TOTP ainda no mesmo passo aos 29s",
+      relogin.codigo_totp("JBSWY3DPEHPK3PXP", 29), "282760")
+check("TOTP muda ao virar o passo",
+      relogin.codigo_totp("JBSWY3DPEHPK3PXP", 30) != "282760", True)
+check("segredo em minúsculas e com espaço funciona",
+      relogin.codigo_totp("jbsw y3dp ehpk 3pxp", 0), "282760")
+
+caixa = relogin.CodigoPendente()
+check("fora da janela, ninguém está esperando", caixa.aguardando, False)
+check("código chegado fora da janela é recusado", caixa.entregar("111111"), False)
+
+caixa.pedir()
+check("com o login esperando, a caixa está aberta", caixa.aguardando, True)
+check("o código é aceito", caixa.entregar("222222"), True)
+check("e chega para quem espera", caixa.esperar(5), "222222")
+check("depois de consumido, a caixa fecha", caixa.aguardando, False)
+
+# Código de uso único: reenviar o mesmo só gasta tentativa no Facebook.
+caixa.pedir()
+check("o mesmo código não vale duas vezes", caixa.entregar("222222"), False)
+check("um código novo vale", caixa.entregar("333333"), True)
+caixa.esperar(5)
+
+# Ninguém respondeu: a espera acaba e a caixa não fica aberta para sempre.
+caixa.pedir()
+check("espera sem resposta devolve nada", caixa.esperar(0.2), None)
+check("e fecha a caixa", caixa.aguardando, False)
+
+
+# ---------------------------------------------------------------------------
 print()
 print("=" * 72)
 if falhas:

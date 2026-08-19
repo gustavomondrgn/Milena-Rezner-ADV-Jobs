@@ -38,6 +38,7 @@ import requests
 from dotenv import load_dotenv
 
 import filters
+import relogin
 import vitality
 from bot_control import CommandListener
 from dispatch import SendQueue
@@ -145,6 +146,27 @@ FACEBOOK_STATE_FILE = Path(
 # cada primeiro deploy (`docker cp`), e um bot sem sessão não dá erro — ele roda
 # e o grupo emudece. Gerar com `python bot/tools/sessao_para_env.py`.
 FACEBOOK_STATE_B64 = os.getenv("FACEBOOK_STATE_B64", "").strip()
+
+# --- Renovacao automatica da sessao ----------------------------------------
+# A sessao do Facebook cai — por tempo, por checkpoint, ou porque ela nasceu
+# noutro IP. Sem isto, "caiu" significa alguem logar na mao e subir arquivo, e
+# ate la o grupo emudece. Com credencial no ambiente o bot refaz o login AQUI,
+# no servidor, que e onde a sessao precisa nascer para nao parecer aparelho
+# estranho depois.
+FB_EMAIL = os.getenv("FB_EMAIL", "").strip()
+FB_PASSWORD = os.getenv("FB_PASSWORD", "")
+# Segredo do autenticador (base32). Com ele, a renovacao e 100% automatica;
+# sem ele, o bot pede o codigo no privado de quem mantem e espera.
+FB_TOTP_SECRET = os.getenv("FB_TOTP_SECRET", "").strip()
+RELOGIN_AUTOMATICO = os.getenv("RELOGIN_AUTOMATICO", "true").strip().lower() in (
+    "1", "true", "sim", "yes", "on")
+RELOGIN_ESPERA_CODIGO_S = int(os.getenv("RELOGIN_ESPERA_CODIGO_S", "600"))
+# Piso entre duas tentativas. Tentar login em cima de checkpoint aberto e o
+# caminho mais rapido para a conta ser bloqueada de vez — entao, se falhou,
+# espera-se de verdade antes de tentar outra.
+RELOGIN_INTERVALO_H = float(os.getenv("RELOGIN_INTERVALO_H", "6"))
+CODIGO_PENDENTE = relogin.CodigoPendente()
+MARCA_RELOGIN = DATA_DIR / ".ultima_renovacao"
 
 FACEBOOK_MAX_POSTS = int(os.getenv("FACEBOOK_MAX_POSTS", "25"))
 FACEBOOK_SCROLLS = int(os.getenv("FACEBOOK_SCROLLS", "4"))
@@ -1387,6 +1409,91 @@ def montar_relatorio(fontes: list[Any], cfg: dict[str, Any],
     return "\n".join(linhas)
 
 
+def _renovacao_recente() -> bool:
+    """True se ja houve tentativa de renovacao dentro da janela minima.
+
+    A marca vai para o disco porque o processo reinicia: sem isso, um container
+    que reinicia em laco tentaria um login por subida.
+    """
+    try:
+        ultima = float(MARCA_RELOGIN.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return False
+    return (time.time() - ultima) < RELOGIN_INTERVALO_H * 3600
+
+
+def _marcar_renovacao() -> None:
+    try:
+        MARCA_RELOGIN.parent.mkdir(parents=True, exist_ok=True)
+        MARCA_RELOGIN.write_text(str(time.time()), encoding="utf-8")
+    except OSError as exc:
+        log.warning("Nao consegui gravar a marca de renovacao: %s", exc)
+
+
+def tentar_renovar_sessao(fonte: Any) -> bool:
+    """Refaz o login da fonte no proprio servidor. True se a sessao voltou."""
+    if not RELOGIN_AUTOMATICO:
+        return False
+    if not hasattr(fonte, "renovar_sessao"):
+        return False
+    if not FB_EMAIL or not FB_PASSWORD:
+        log.info("Sem FB_EMAIL/FB_PASSWORD no ambiente — a sessao so volta na mao.")
+        return False
+    if _renovacao_recente():
+        log.info("Ja tentei renovar a sessao ha menos de %sh — nao insisto.",
+                 RELOGIN_INTERVALO_H)
+        return False
+
+    _marcar_renovacao()
+
+    def avisar_que_precisa_de_codigo() -> None:
+        # A caixa e aberta ANTES do aviso: se ela abrisse depois, uma resposta
+        # rapida chegaria antes de haver quem a recebesse, e o codigo — que e de
+        # uso unico — se perderia.
+        CODIGO_PENDENTE.pedir()
+        alertar_operacao(
+            "A sessao do Facebook caiu e eu estou refazendo o login aqui no "
+            "servidor. O Facebook pediu o codigo de dois fatores.\n\n"
+            "Me manda o codigo aqui nesta conversa (so os seis digitos). "
+            f"Eu espero {RELOGIN_ESPERA_CODIGO_S // 60} minutos."
+        )
+
+    def obter_codigo() -> str | None:
+        if FB_TOTP_SECRET:
+            try:
+                codigo = relogin.codigo_totp(FB_TOTP_SECRET)
+                log.info("Codigo de dois fatores gerado do segredo TOTP.")
+                return codigo
+            except Exception as exc:  # noqa: BLE001
+                log.error("FB_TOTP_SECRET invalido (%s) — vou pedir no Telegram.", exc)
+                CODIGO_PENDENTE.pedir()
+                alertar_operacao(
+                    "O segredo do autenticador esta invalido. Me manda o codigo "
+                    "de dois fatores do Facebook aqui (seis digitos)."
+                )
+        return CODIGO_PENDENTE.esperar(RELOGIN_ESPERA_CODIGO_S)
+
+    try:
+        ok = fonte.renovar_sessao(
+            FB_EMAIL, FB_PASSWORD,
+            obter_codigo=obter_codigo,
+            ao_precisar_de_codigo=None if FB_TOTP_SECRET else avisar_que_precisa_de_codigo,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.exception("Renovacao de sessao explodiu: %s", exc)
+        ok = False
+    finally:
+        CODIGO_PENDENTE.desistir()
+
+    if ok:
+        log.info("Sessao do Facebook renovada sozinha.")
+        alertar_operacao(
+            "Sessao do Facebook renovada sozinha aqui no servidor. A coleta "
+            "volta no proximo ciclo — nao precisa fazer nada."
+        )
+    return ok
+
+
 def alertar_operacao(texto: str) -> None:
     """Aviso de manutenção, para o privado de quem cuida — nunca para o grupo.
 
@@ -1524,12 +1631,19 @@ def coletar(fontes: list[Any], cfg: dict[str, Any]) -> tuple[list[Job], set[str]
             # emudece. Por isso vira alerta no privado de quem mantém, uma vez
             # por dia, em vez de mais uma linha de log que ninguém lê.
             log.error("Fonte %s sem sessão válida: %s", fonte.name, exc)
+
+            # Antes de incomodar alguém, tentar resolver: refazer o login aqui
+            # no servidor é o que devolve a coleta sem ninguém no teclado.
+            if tentar_renovar_sessao(fonte):
+                continue
+
             if STATS.marcar_alerta(f"auth:{fonte.name}", hoje_local()):
                 alertar_operacao(
-                    f"A sessão do {getattr(fonte, 'label', fonte.name)} expirou e o "
-                    f"bot parou de coletar dessa fonte.\n\n"
+                    f"A sessão do {getattr(fonte, 'label', fonte.name)} caiu e eu "
+                    f"não consegui refazer o login sozinho.\n\n"
                     f"Para resolver: rodar `python bot/tools/facebook_login.py` "
-                    f"na máquina local e subir o fb_state.json novo para o volume.\n\n"
+                    f"na máquina local, depois `python bot/tools/sessao_para_env.py`, "
+                    f"colar o valor em FACEBOOK_STATE_B64 no Coolify e redeployar.\n\n"
                     f"Detalhe técnico: {exc}"
                 )
             continue
@@ -2013,6 +2127,10 @@ def main() -> None:
         instagram_url=INSTAGRAM_URL,
         suporte_telegram=SUPORTE_TELEGRAM,
         chats_legados=CHATS_MENU_LEGADO,
+        # Únicos chats de onde um código de dois fatores é aceito, e só enquanto
+        # uma renovação estiver esperando por ele.
+        chats_admin=set(REPORT_CHAT_IDS),
+        entregar_codigo=CODIGO_PENDENTE.entregar,
     ).start()
 
     log.info("Relatório diário às %dh (%s), destino: %s",

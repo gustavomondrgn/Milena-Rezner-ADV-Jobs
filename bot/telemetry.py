@@ -54,8 +54,13 @@ class DailyStats:
         self._por_fonte: dict[str, dict[str, int]] = {}
         self._cota_diaria_anunciada = False
         self._relatorio_enviado = False
-        # Alertas de operação já disparados hoje. Só em memória de propósito: um
-        # redeploy é justamente quando vale reavisar que algo continua quebrado.
+        # Alertas de operação já disparados hoje. Ficavam só em memória, com o
+        # argumento de que um redeploy é quando vale reavisar. O argumento não
+        # sobreviveu ao primeiro dia de produção: cinco deploys seguidos de
+        # ajuste no proxy renderam cinco vezes o mesmo aviso no privado, com
+        # quatro minutos entre eles. Alerta repetido é alerta que se aprende a
+        # ignorar — então a marca vai para o disco e o aviso volta a ser um por
+        # dia, redeploy ou não.
         self._alertados: set[str] = set()
         self._load()
 
@@ -77,6 +82,7 @@ class DailyStats:
             for fonte, contadores in (dados.get("por_fonte") or {}).items()
         }
         self._relatorio_enviado = bool(dados.get("relatorio_enviado"))
+        self._alertados = {str(x) for x in (dados.get("alertados") or [])}
         if self._totais:
             log.info("Contadores do dia %s recuperados do disco: %d enviada(s)",
                      self._dia, self._totais.get("sent", 0))
@@ -91,6 +97,7 @@ class DailyStats:
                     "totais": self._totais,
                     "por_fonte": self._por_fonte,
                     "relatorio_enviado": self._relatorio_enviado,
+                    "alertados": sorted(self._alertados),
                 }, f, ensure_ascii=False)
             tmp.replace(self.path)
         except OSError as exc:
@@ -178,6 +185,7 @@ class DailyStats:
             if chave in self._alertados:
                 return False
             self._alertados.add(chave)
+            self._save_locked()
             return True
 
     # -- leitura ------------------------------------------------------------

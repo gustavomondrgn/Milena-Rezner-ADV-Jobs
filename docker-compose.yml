@@ -70,6 +70,21 @@ services:
       # container na mão depois do primeiro deploy. Gerar com
       # `python bot/tools/sessao_para_env.py`.
       - FACEBOOK_STATE_B64=${FACEBOOK_STATE_B64:-}
+      # Credencial para o bot REFAZER o login sozinho, aqui dentro, quando a
+      # sessão cair. É o que separa "caiu de madrugada e voltou" de "caiu e
+      # alguém precisa perceber". Sem estas, a sessão só volta na mão.
+      #
+      # A sessão precisa NASCER no servidor: uma criada noutra máquina chega ao
+      # Facebook como aparelho novo em lugar novo e cai em checkpoint, mesmo
+      # continuando válida na máquina de origem.
+      - FB_EMAIL=${FB_EMAIL:-}
+      - FB_PASSWORD=${FB_PASSWORD:-}
+      # Segredo do autenticador (base32). COM ele a renovação é automática de
+      # ponta a ponta; sem ele o bot pede o código no privado de quem mantém.
+      - FB_TOTP_SECRET=${FB_TOTP_SECRET:-}
+      - RELOGIN_AUTOMATICO=${RELOGIN_AUTOMATICO:-true}
+      - RELOGIN_ESPERA_CODIGO_S=${RELOGIN_ESPERA_CODIGO_S:-600}
+      - RELOGIN_INTERVALO_H=${RELOGIN_INTERVALO_H:-6}
       - TIMEZONE=${TIMEZONE:-America/Sao_Paulo}
       - REPORT_HOUR=${REPORT_HOUR:-22}
       - REPORT_TO=${REPORT_TO:-grupo}

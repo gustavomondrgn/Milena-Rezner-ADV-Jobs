@@ -211,6 +211,11 @@ conserta com uma frase no `profile.md`, não com uma linha de código.
 | `SOURCES` | Fontes ativas | `facebook` |
 | `INTERVAL_FACEBOOK` | Intervalo da coleta (s) | `1800` |
 | `FACEBOOK_STATE_FILE` | Sessão. Vazio = `DATA_DIR/fb_state.json` | — |
+| `FACEBOOK_STATE_B64` | A sessão em base64 — é assim que ela chega no servidor | — |
+| `FB_EMAIL` / `FB_PASSWORD` | Credencial para o bot **refazer o login sozinho** no servidor | — |
+| `FB_TOTP_SECRET` | Segredo do autenticador. Com ele a renovação é automática de ponta a ponta | — |
+| `RELOGIN_AUTOMATICO` | Liga a renovação automática | `true` |
+| `RELOGIN_INTERVALO_H` | Piso entre duas tentativas de login | `6` |
 | `FACEBOOK_HEADLESS` | Sempre `true` em produção | `true` |
 | `FACEBOOK_MAX_POSTS` | Teto de posts por grupo por ciclo | `25` |
 | `FACEBOOK_SCROLLS` | Quantas telas rolar por grupo | `4` |
@@ -218,12 +223,13 @@ conserta com uma frase no `profile.md`, não com uma linha de código.
 | `SEND_WINDOW_START` / `_END` | Janela de envio | `6` / `23` |
 | `MIN_SCORE` | Nota mínima para entrar na fila | `0` |
 | `REJEITAR_DIVULGACAO` | Recusar advogado se anunciando | `true` |
-| `UFS_ATENDIDAS` | UFs. **Vazio = todas** | `SP,RJ,SC,PR,RS,MG,BA,PE,DF,GO,ES,CE` |
+| `UFS_ATENDIDAS` | UFs. **Vazio = todas**, que é o padrão deste projeto | *(vazio)* |
 | `ACEITAR_SEM_LOCAL` | Aceitar demanda presencial sem local declarado | `true` |
 | `REJECT_ENGLISH` | Recusar post em inglês | `true` |
 | `DATABASE_URL` | Postgres do painel. Vazio = bot roda igual, sem dashboard | — |
 | `DATA_DIR` | Estado. **Não cadastrar no Coolify** — é fixo no compose | `/app/data` |
 | `TIMEZONE` / `REPORT_HOUR` | Relatório diário | `America/Sao_Paulo` / `22` |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Primeiro usuário do painel, criado no boot | — |
 
 ## Deploy
 
@@ -232,16 +238,31 @@ docker compose up -d --build
 ```
 
 Via Coolify: New Resource → Docker Compose → conectar ao repo → cadastrar as
-variáveis → deploy. `ADMIN_DOMAIN` precisa existir para o Traefik criar a rota
-do painel.
+variáveis → deploy.
 
-**Depois do primeiro deploy**, copiar o `fb_state.json` para o volume:
+Não há passo manual depois do deploy. As duas coisas que antes exigiam entrar
+no container viajam pelo ambiente:
+
+- **a sessão do Facebook**, em `FACEBOOK_STATE_B64` (gerar com
+  `python bot/tools/sessao_para_env.py`). O bot escreve o arquivo no volume no
+  boot e só sobrescreve quando o valor da variável muda — ele mesmo renova os
+  cookies a cada ciclo, e reescrever a cada boot devolveria sessão velha;
+- **o primeiro usuário do painel**, em `ADMIN_EMAIL` / `ADMIN_PASSWORD`. Criado
+  no boot se ainda não existir; nunca sobrescreve senha de quem já existe.
+
+Duas armadilhas do Coolify que custaram deploy neste projeto:
+
+- **"Connect To Predefined Network" precisa estar ligado**, senão o Traefik não
+  alcança o container e responde 503 com tudo no ar;
+- **"Escape special characters in labels" precisa estar DESLIGADO** se algum
+  label usar variável. Com ele ligado, ``Host(`${ADMIN_DOMAIN}`)`` vira texto
+  literal, nenhuma rota casa e o sintoma é o mesmo 503.
+
+Usuários adicionais do painel:
 
 ```bash
-docker cp fb_state.json adv-jobs-bot:/app/data/fb_state.json
+docker exec adv-jobs-admin node /opt/manut/scripts/criar-usuario.mjs   email@exemplo.com "senha" "Nome"
 ```
-
-Sem isso o bot sobe, avisa que não tem sessão e não coleta nada.
 
 ## Stack
 

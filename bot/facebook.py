@@ -527,6 +527,196 @@ class FacebookSource(BaseSource):
             self._grupos_mtime = mtime
         return self._grupos
 
+    # -- renovacao da sessao ------------------------------------------------
+
+    def renovar_sessao(self, email: str, senha: str,
+                       obter_codigo: Any = None,
+                       ao_precisar_de_codigo: Any = None) -> bool:
+        """Faz login de novo, aqui mesmo, e regrava o arquivo de sessao.
+
+        Roda DENTRO do servidor de proposito. Uma sessao criada noutra maquina
+        chega ao Facebook como aparelho novo em lugar novo e cai no checkpoint —
+        e o pior e que ela continua valida na maquina de origem, entao parece
+        que esta tudo certo. Login feito daqui nao tem esse descompasso: o IP
+        que entrou e o IP que vai navegar depois.
+
+        `obter_codigo()` devolve o codigo de dois fatores (do segredo TOTP ou de
+        quem responder no Telegram) e pode demorar minutos.
+        `ao_precisar_de_codigo` e chamado ANTES da espera, para avisar quem
+        precisa manda-lo.
+
+        Devolve True so quando a sessao nova foi gravada e validada.
+        """
+        try:
+            from playwright.sync_api import sync_playwright  # noqa: PLC0415
+        except ImportError:
+            log.error("playwright nao instalado — sem como renovar a sessao")
+            return False
+
+        log.info("Tentando renovar a sessao do Facebook a partir do servidor...")
+        with sync_playwright() as pw:
+            navegador = pw.chromium.launch(
+                headless=self.headless,
+                args=["--disable-blink-features=AutomationControlled",
+                      "--no-sandbox", "--disable-dev-shm-usage"],
+            )
+            # Sessao nova, sem carregar a antiga: a antiga e justamente a que o
+            # Facebook recusou, e reaproveita-la traria o checkpoint junto.
+            contexto = navegador.new_context(
+                locale="pt-BR",
+                timezone_id="America/Sao_Paulo",
+                viewport={"width": 1366, "height": 900},
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+                ),
+            )
+            contexto.add_init_script(
+                "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
+            )
+            pagina = contexto.new_page()
+            try:
+                return self._fluxo_de_login(pagina, contexto, email, senha,
+                                            obter_codigo, ao_precisar_de_codigo)
+            except Exception as exc:  # noqa: BLE001
+                log.error("Renovacao de sessao falhou: %s", exc)
+                return False
+            finally:
+                try:
+                    contexto.close()
+                    navegador.close()
+                except Exception:  # noqa: BLE001
+                    pass
+
+    def _fluxo_de_login(self, pagina: Any, contexto: Any, email: str, senha: str,
+                        obter_codigo: Any, ao_precisar_de_codigo: Any) -> bool:
+        pagina.goto("https://www.facebook.com/login.php",
+                    wait_until="domcontentloaded", timeout=60_000)
+        self._aceitar_cookies(pagina)
+
+        pagina.fill('input[name="email"]', email, timeout=30_000)
+        pagina.fill('input[name="pass"]', senha, timeout=30_000)
+        pagina.click('button[name="login"], button[type="submit"]', timeout=30_000)
+        pagina.wait_for_timeout(6000)
+        log.info("Login enviado — pagina agora: %s", pagina.url)
+
+        if self._pede_codigo(pagina):
+            if obter_codigo is None:
+                log.error("O Facebook pediu codigo de dois fatores e nao ha de "
+                          "onde tirar um (sem segredo TOTP e sem quem responda).")
+                return False
+            if ao_precisar_de_codigo is not None:
+                try:
+                    ao_precisar_de_codigo()
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("Falha avisando que o codigo e necessario: %s", exc)
+            codigo = obter_codigo()
+            if not codigo:
+                log.error("Nenhum codigo chegou a tempo — abandonando a renovacao.")
+                return False
+            if not self._enviar_codigo(pagina, codigo):
+                return False
+
+        # "Salvar navegador?" — salvar e o que evita repetir isto a cada login.
+        self._confirmar_dispositivo(pagina)
+
+        # A prova real: uma pagina logada que nao redireciona para o login.
+        pagina.goto("https://www.facebook.com/groups/feed/",
+                    wait_until="domcontentloaded", timeout=60_000)
+        url = (pagina.url or "").lower()
+        if any(sinal in url for sinal in _SINAIS_LOGIN):
+            log.error("Depois do login o Facebook ainda manda para %s — "
+                      "provavelmente checkpoint que exige gente.", pagina.url)
+            return False
+
+        cookies = {c["name"] for c in contexto.cookies()}
+        if "c_user" not in cookies:
+            log.error("Login terminou sem o cookie de sessao (c_user).")
+            return False
+
+        self.state_file.parent.mkdir(parents=True, exist_ok=True)
+        contexto.storage_state(path=str(self.state_file))
+        log.info("Sessao renovada e gravada em %s", self.state_file)
+        return True
+
+    @staticmethod
+    def _aceitar_cookies(pagina: Any) -> None:
+        for texto in ("Permitir todos os cookies", "Allow all cookies",
+                      "Aceitar tudo", "Permitir cookies essenciais"):
+            try:
+                botao = pagina.get_by_role("button", name=texto)
+                if botao.count():
+                    botao.first.click(timeout=5000)
+                    pagina.wait_for_timeout(1500)
+                    return
+            except Exception:  # noqa: BLE001
+                continue
+
+    @staticmethod
+    def _pede_codigo(pagina: Any) -> bool:
+        if "two_factor" in (pagina.url or "").lower():
+            return True
+        for seletor in ('input[name="approvals_code"]',
+                        'input[autocomplete="one-time-code"]',
+                        'input[name="code"]'):
+            try:
+                if pagina.locator(seletor).count():
+                    return True
+            except Exception:  # noqa: BLE001
+                continue
+        return False
+
+    @staticmethod
+    def _enviar_codigo(pagina: Any, codigo: str) -> bool:
+        preenchido = False
+        for seletor in ('input[name="approvals_code"]',
+                        'input[autocomplete="one-time-code"]',
+                        'input[name="code"]'):
+            try:
+                campo = pagina.locator(seletor)
+                if not campo.count():
+                    continue
+                campo.first.fill(codigo, timeout=15_000)
+                preenchido = True
+                break
+            except Exception:  # noqa: BLE001
+                continue
+        if not preenchido:
+            log.error("Nao achei onde digitar o codigo.")
+            return False
+
+        for seletor in ('#checkpointSubmitButton', 'button[type="submit"]',
+                        'div[role="button"]:has-text("Continuar")'):
+            try:
+                botao = pagina.locator(seletor)
+                if botao.count():
+                    botao.first.click(timeout=15_000)
+                    break
+            except Exception:  # noqa: BLE001
+                continue
+        pagina.wait_for_timeout(8000)
+        log.info("Codigo enviado — pagina agora: %s", pagina.url)
+        return True
+
+    @staticmethod
+    def _confirmar_dispositivo(pagina: Any) -> None:
+        """Aceita o "salvar navegador" quando ele aparece.
+
+        Salvar e o que faz o PROXIMO login nao pedir codigo de novo. Recusar
+        transformaria cada renovacao num pedido de codigo no Telegram.
+        """
+        for _ in range(2):
+            try:
+                if "checkpoint" not in (pagina.url or "").lower():
+                    return
+                botao = pagina.locator('#checkpointSubmitButton, button[type="submit"]')
+                if not botao.count():
+                    return
+                botao.first.click(timeout=10_000)
+                pagina.wait_for_timeout(5000)
+            except Exception:  # noqa: BLE001
+                return
+
     # -- coleta -------------------------------------------------------------
 
     def fetch(self) -> list[Job]:

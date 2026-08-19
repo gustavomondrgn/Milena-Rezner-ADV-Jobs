@@ -108,7 +108,16 @@ class CommandListener:
 
     def __init__(self, token: str, site_url: str = "", instagram_url: str = "",
                  suporte_telegram: str = "",
-                 chats_legados: set[int] | None = None) -> None:
+                 chats_legados: set[int] | None = None,
+                 chats_admin: set[str] | None = None,
+                 entregar_codigo=None) -> None:
+        # `entregar_codigo(codigo) -> bool` existe para UMA coisa: quando a
+        # sessao do Facebook cai e o login refeito no servidor pede o codigo de
+        # dois fatores, alguem precisa mandar esse codigo de onde estiver. Nao e
+        # a volta do painel por comando — fora da janela em que o login espera,
+        # um numero de seis digitos no privado nao faz nada.
+        self.chats_admin = {str(c) for c in (chats_admin or set())}
+        self.entregar_codigo = entregar_codigo
         self.token = token
         self.site_url = site_url
         self.instagram_url = instagram_url
@@ -211,6 +220,24 @@ class CommandListener:
 
         texto = (msg.get("text") or "").strip()
         comando = texto.split()[0].lstrip("/").split("@")[0].lower() if texto else ""
+
+        # Codigo de dois fatores para a renovacao da sessao do Facebook. So de
+        # quem mantem, e so enquanto um login estiver esperando por ele.
+        if self.entregar_codigo is not None and str(chat["id"]) in self.chats_admin:
+            from relogin import extrair_codigo  # noqa: PLC0415
+
+            codigo = extrair_codigo(texto)
+            if codigo:
+                if self.entregar_codigo(codigo):
+                    responder(self.token, chat["id"],
+                              "\U0001F511 Codigo recebido. Terminando o login "
+                              "do Facebook — te aviso em seguida.")
+                else:
+                    responder(self.token, chat["id"],
+                              "Nenhum login esperando codigo agora. Se a sessao "
+                              "tiver caido, eu peco o codigo aqui assim que a "
+                              "renovacao comecar.")
+                return
 
         if comando in ("suporte", "ajuda", "help", "contato"):
             responder(self.token, chat["id"], self.texto_suporte())
