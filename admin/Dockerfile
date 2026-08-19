@@ -33,6 +33,11 @@ RUN npm init -y > /dev/null  && npm install --no-fund --no-audit bcryptjs@2.4.3 
 FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0
+# O schema saiu de /app/db junto com os scripts de manutenção. Sem apontar onde
+# ele foi parar, o painel loga "db/schema.sql não encontrado — contando com o
+# bot": não quebra nada, porque o bot aplica mesmo, mas esconde o caso em que o
+# bot NÃO subiu e o painel poderia ter aplicado sozinho.
+ENV SCHEMA_FILE=/opt/manut/db/schema.sql
 
 # Usuário sem privilégios: se alguém escapar do processo, não escapa como root.
 RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001
