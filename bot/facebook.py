@@ -936,6 +936,12 @@ class FacebookSource(BaseSource):
 
         url_atual = (pagina.url or "").lower()
         if any(s in url_atual for s in _SINAIS_LOGIN):
+            # Fotografa ANTES de levantar o erro. "A sessao caiu" e uma frase
+            # que serve para tres coisas diferentes — pagina de login, pedido de
+            # senha de novo, CAPTCHA — e so a tela diz qual delas e.
+            self.ultimo_diagnostico = {"fases": [
+                {"fase": "coleta", "url": pagina.url, "titulo": grupo.rotulo}]}
+            self._fotografar(pagina)
             raise AuthError(
                 f"Facebook redirecionou para {pagina.url} — a sessão expirou ou "
                 "caiu em checkpoint. Rode `python bot/tools/facebook_login.py` "

@@ -166,6 +166,10 @@ RELOGIN_ESPERA_CODIGO_S = int(os.getenv("RELOGIN_ESPERA_CODIGO_S", "600"))
 # espera-se de verdade antes de tentar outra.
 RELOGIN_INTERVALO_H = float(os.getenv("RELOGIN_INTERVALO_H", "6"))
 CODIGO_PENDENTE = relogin.CodigoPendente()
+# Uma subida, um relatorio da primeira coleta. Sem isto, "nao chegou nada no
+# Telegram" tanto pode ser bot saudavel num minuto sem post quanto sessao
+# recusada em silencio — e as duas exigem acoes opostas.
+_PRIMEIRA_COLETA_REPORTADA: set[str] = set()
 MARCA_RELOGIN = DATA_DIR / ".ultima_renovacao"
 
 # Saida de rede do navegador do bot. Vazio = direto. Serve para o trafego nao
@@ -1680,6 +1684,13 @@ def coletar(fontes: list[Any], cfg: dict[str, Any]) -> tuple[list[Job], set[str]
         inicio = time.monotonic()
         try:
             jobs = fonte.fetch()
+            if fonte.name not in _PRIMEIRA_COLETA_REPORTADA:
+                _PRIMEIRA_COLETA_REPORTADA.add(fonte.name)
+                grupos_lidos = len(getattr(fonte, "grupos", lambda: [])() or [])
+                alertar_operacao(
+                    f"Primeira coleta desta subida: {len(jobs)} post(s) lidos "
+                    f"em {grupos_lidos} grupo(s). A sessao esta valendo."
+                )
         except AuthError as exc:
             # Sessão do Facebook morta. É a única falha deste bot que NÃO se
             # resolve sozinha e que não dá sintoma nenhum: sem sessão o feed
@@ -1687,6 +1698,21 @@ def coletar(fontes: list[Any], cfg: dict[str, Any]) -> tuple[list[Job], set[str]
             # emudece. Por isso vira alerta no privado de quem mantém, uma vez
             # por dia, em vez de mais uma linha de log que ninguém lê.
             log.error("Fonte %s sem sessão válida: %s", fonte.name, exc)
+
+            # A primeira falha de cada subida sempre e contada, com a tela que a
+            # coleta encontrou. Depois disso vale a trava de um aviso por dia.
+            if fonte.name not in _PRIMEIRA_COLETA_REPORTADA:
+                _PRIMEIRA_COLETA_REPORTADA.add(fonte.name)
+                diag_coleta = getattr(fonte, "ultimo_diagnostico", None) or {}
+                legenda = ("🛠 <b>A coleta bateu em pagina de login</b>\n\n"
+                           f"{html.escape(str(exc))[:400]}")
+                if diag_coleta.get("texto"):
+                    legenda += ("\n\nTexto da tela: "
+                                f"{html.escape(diag_coleta['texto'])[:250]}")
+                if diag_coleta.get("png"):
+                    enviar_foto_operacao(diag_coleta["png"], legenda)
+                else:
+                    alertar_operacao(legenda)
 
             # Antes de incomodar alguém, tentar resolver: refazer o login aqui
             # no servidor é o que devolve a coleta sem ninguém no teclado.
