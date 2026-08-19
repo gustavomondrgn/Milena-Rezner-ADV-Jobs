@@ -65,6 +65,11 @@ services:
       - FACEBOOK_SCROLLS=${FACEBOOK_SCROLLS:-4}
       # Vazio = <DATA_DIR>/fb_state.json, que é onde o login manual deposita.
       - FACEBOOK_STATE_FILE=${FACEBOOK_STATE_FILE:-}
+      # A sessão em base64. É assim que ela entra no volume em produção, no
+      # boot — sem isto, alguém teria de copiar o arquivo para dentro do
+      # container na mão depois do primeiro deploy. Gerar com
+      # `python bot/tools/sessao_para_env.py`.
+      - FACEBOOK_STATE_B64=${FACEBOOK_STATE_B64:-}
       - TIMEZONE=${TIMEZONE:-America/Sao_Paulo}
       - REPORT_HOUR=${REPORT_HOUR:-22}
       - REPORT_TO=${REPORT_TO:-grupo}
@@ -79,16 +84,16 @@ services:
       - SEND_WINDOW_END=${SEND_WINDOW_END:-23}
       - QUEUE_TTL_DAYS=${QUEUE_TTL_DAYS:-3}
       - MIN_SCORE=${MIN_SCORE:-0}
-      # Post removido do Facebook: a mensagem correspondente sai do grupo.
-      # "apagar" | "marcar" | "nada". A verificação usa o navegador logado —
+      # Post removido do Facebook: a mensagem fica no grupo, riscada, com o
+      # aviso. "apagar" | "marcar" | "nada". A verificação usa o navegador logado —
       # ver FacebookSource.verificar_posts.
-      - ACAO_VAGA_ENCERRADA=${ACAO_VAGA_ENCERRADA:-apagar}
+      - ACAO_VAGA_ENCERRADA=${ACAO_VAGA_ENCERRADA:-marcar}
       - RECHECK_HORAS=${RECHECK_HORAS:-24}
       - RECHECK_POR_CICLO=${RECHECK_POR_CICLO:-8}
       - RECHECK_DIAS=${RECHECK_DIAS:-30}
       # --- Regras de corte ---
       - REJEITAR_DIVULGACAO=${REJEITAR_DIVULGACAO:-true}
-      - UFS_ATENDIDAS=${UFS_ATENDIDAS:-SP,RJ,SC,PR,RS,MG,BA,PE,DF,GO,ES,CE}
+      - UFS_ATENDIDAS=${UFS_ATENDIDAS:-}
       - ACEITAR_SEM_LOCAL=${ACEITAR_SEM_LOCAL:-true}
       - REJECT_ENGLISH=${REJECT_ENGLISH:-true}
       # --- Apresentação do bot no privado ---

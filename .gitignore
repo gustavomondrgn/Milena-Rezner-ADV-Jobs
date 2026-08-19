@@ -19,6 +19,7 @@ bot/data/
 # arquivo entra na conta sem login. Nunca commitar, nunca mandar por chat.
 fb_state.json
 *fb_state*.json
+*fb_state*.b64.txt
 
 # Cópia que o listar_grupos.py deixa antes de reescrever a lista de grupos.
 *.bak

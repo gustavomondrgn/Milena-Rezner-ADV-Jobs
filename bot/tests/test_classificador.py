@@ -196,11 +196,14 @@ Isabela Faria, Jean Eduardo Lima - Adv, Senara Cruz, João Neto.
 """, "RJ", "corta", None, None),
 ]
 
-# Casos reais em que **eu não sei** qual é a resposta certa — a decisão é de
-# negócio, não de código. Rodam e imprimem o veredito sem cobrar nada, para o
-# Gustavo e a Dra. Milena olharem e decidirem se querem esse tipo de post ou não.
-AMBIGUOS = [
-    ("moto financiada que a empresa não quitou", """
+# ------------------------------------------- empates já decididos --------
+# Os três abaixo ficaram em cima do muro na colheita de 16/08 e a decisão era de
+# negócio, não de código. Decididos em 19/08 e escritos no `profile.md`, seção
+# "Empates já decididos" — agora são caso cobrado como qualquer outro.
+
+# Tem uma empresa do outro lado, mas não é consumo: é contrato assinado em
+# cartório que a outra parte não cumpriu. Área dela.
+CASOS.append(("[real] contrato: empresa assumiu a dívida da moto e sumiu", """
 Eu tenho a seguinte dúvida, em setembro do ano passado eu passei uma moto que era
 nova financiada para uma empresa quitar e tirar do nome da minha amiga, e então
 fomos no cartório colocamos a moto na responsabilidade desta empresa sob
@@ -208,13 +211,27 @@ cartório. Porém até hoje eles não quitaram a moto ainda, não respondem mais
 WhatsApp, e desativaram a conta no Instagram. No contrato do cartório diz que
 eles tem que quitar em até 24 meses, porém até agora nada, estou com medo de ter
 caído em golpe, como devo proceder?
-"""),
-    ("cobrança pessoal sem nenhum detalhe", "posso processar alguém que está me devendo ??"),
-    ("colega perguntando procedimento de despejo comercial", """
+""", "", "passa", "lead_cliente", "contratos"))
+
+# Cobrança é área dela e quem escreve tem um problema real — só não contou nada.
+# Passa com nota baixa, que é o que joga o post para o fim da fila.
+CASOS.append(("[real] cobrança sem nenhum detalhe",
+              "posso processar alguém que está me devendo ??",
+              "", "passa", "lead_cliente", "cobranca"))
+
+# Colega perguntando como funciona o procedimento: ninguém contrata ninguém no
+# fim dessa conversa, mesmo o tema sendo imobiliário.
+CASOS.append(("[real] colega perguntando procedimento de despejo comercial", """
 Bom dia, doutores! Quando acontece um despejo comercial; as chaves da loja, ficam
 com quem... (O Oficial de Justiça; ou o proprietário do imóvel?) Obrigado!
-"""),
-]
+""", "", "corta", None, None))
+
+
+# Onde entram os PRÓXIMOS empates: caso real cuja resposta certa é decisão de
+# negócio, não de código. Rodam e imprimem o veredito sem cobrar nada, para o
+# Gustavo e a Dra. Milena olharem. Quando a decisão sair, o caso sobe para
+# `CASOS` com o esperado preenchido e a regra vai para o `profile.md`.
+AMBIGUOS: list[tuple[str, str]] = []
 
 
 def _classificar(cfg, nome: str, texto: str, uf: str, i: int):

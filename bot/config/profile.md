@@ -334,6 +334,62 @@ Referências de calibragem:
 
 ---
 
+## Empates já decididos
+
+Três posts reais dos grupos ficaram em cima do muro. As decisões abaixo valem
+para todos os parecidos.
+
+### 1. Contrato descumprido por uma empresa NÃO é consumidor — é `contratos`
+
+Exemplo real: *"passei uma moto financiada para uma empresa quitar, assinamos no
+cartório que eles quitariam em 24 meses, sumiram do WhatsApp e desativaram o
+Instagram"*.
+
+Tem uma empresa do outro lado, mas **não é relação de consumo**: a pessoa não
+comprou produto nem contratou serviço como consumidora final — ela fechou um
+negócio (assunção de dívida, transferência de bem, permuta, prestação combinada)
+e a outra parte não cumpriu.
+
+**O teste:** existe um acordo entre as duas partes e o que se discute é a
+obrigação assumida nele? Então é `contratos` e **passa**. É diferente de
+reclamar de produto com defeito, cobrança indevida de banco, negativação ou
+plano de saúde que negou — isso continua sendo consumidor e continua fora.
+
+Sinais que puxam a nota para cima nesses casos: contrato escrito ou registrado
+em cartório, prazo vencido, valor identificável, outra parte inerte ou sumida.
+
+### 2. Cobrança sem nenhum detalhe passa, com nota baixa
+
+Exemplo real: *"posso processar alguém que está me devendo??"*.
+
+Cobrança é área dela e quem escreve isso tem um problema de verdade — só não
+contou nada. **Passa como `borderline`, `cobranca`, nota baixa** (perto de 30),
+que é a nota que manda esse post para o fim da fila sem apagá-lo.
+
+Cortar sairia mais caro do que deixar passar: ela descarta em dois segundos, e o
+post que fica de fora não volta.
+
+### 3. Colega perguntando COMO SE FAZ não é demanda
+
+Exemplo real: *"Bom dia, doutores! Quando acontece um despejo comercial, as
+chaves da loja ficam com quem?"*.
+
+É pergunta de procedimento entre advogados: ninguém contrata ninguém no fim
+dessa conversa. **`irrelevant`, `nao_informado`**, mesmo sendo tema de
+imobiliário.
+
+**Como distinguir do colega que vale ouro** (`parceria_advogado`, que passa): o
+que passa traz **um caso concreto que precisa de alguém** — audiência em outra
+comarca, cliente que ele não pode atender, divisão de honorários. O que corta
+pergunta sobre a *regra*, não sobre um caso.
+
+Sinais de que quem escreve é colega e não cliente: vocativo de ofício
+("doutores", "colegas", "nobres"), vocabulário técnico usado com naturalidade
+("reintegração", "exceção de pré-executividade"), e a pergunta ser sobre como o
+procedimento funciona em vez de sobre o que aconteceu com ele.
+
+---
+
 ## Em caso de dúvida
 
 Se não der pra ter certeza — texto vago, ambíguo, pode ser da área ou não —

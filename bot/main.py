@@ -20,6 +20,8 @@ anunciando. O filtro mais importante deste projeto não é de área nem de lugar
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import html
 import json
 import logging
@@ -138,6 +140,12 @@ PUBLICADAS_FILE = DATA_DIR / "publicadas.json"
 FACEBOOK_STATE_FILE = Path(
     os.getenv("FACEBOOK_STATE_FILE", "").strip() or (DATA_DIR / "fb_state.json")
 )
+# A mesma sessão, em base64, vinda do ambiente. É como ela chega no servidor:
+# sem isto o arquivo teria de ser copiado para dentro do volume na mão depois de
+# cada primeiro deploy (`docker cp`), e um bot sem sessão não dá erro — ele roda
+# e o grupo emudece. Gerar com `python bot/tools/sessao_para_env.py`.
+FACEBOOK_STATE_B64 = os.getenv("FACEBOOK_STATE_B64", "").strip()
+
 FACEBOOK_MAX_POSTS = int(os.getenv("FACEBOOK_MAX_POSTS", "25"))
 FACEBOOK_SCROLLS = int(os.getenv("FACEBOOK_SCROLLS", "4"))
 
@@ -1327,11 +1335,11 @@ def montar_relatorio(fontes: list[Any], cfg: dict[str, Any],
                      titulo: str = "Relatório do dia") -> str:
     """Monta o resumo do dia: quantas vagas foram ao grupo, e de onde vieram.
 
-    O relatório é do Gabriel, não nosso. Ele pediu explicitamente **só** o que
-    entrega valor pra ele: quantas vagas o grupo recebeu hoje e a quebra dessas
-    vagas por fonte. Nada de recusadas, descartadas, repetidas, cortadas no
-    pré-filtro ou saúde da cota de IA — isso é diagnóstico interno, e no meio do
-    relatório dele só servia pra fazer o número bom parecer pequeno.
+    O relatório é do cliente, não nosso: quantas demandas o grupo recebeu hoje
+    e a quebra delas por área. Nada de recusadas, descartadas, repetidas,
+    cortadas no pré-filtro ou saúde da cota de IA — isso é diagnóstico interno,
+    e no meio do relatório dela só serviria pra fazer o número bom parecer
+    pequeno.
 
     Os contadores continuam todos existindo (`telemetry.py`) e continuam
     visíveis no painel, que é o lugar certo pra diagnóstico.
@@ -1398,7 +1406,14 @@ def alertar_operacao(texto: str) -> None:
 
 
 def enviar_relatorio(fontes: list[Any], cfg: dict[str, Any],
-                     titulo: str = "Relatório do dia") -> None:
+                     titulo: str = "Relatório do dia") -> bool:
+    """Manda o resumo do dia. Devolve True se pelo menos um destino recebeu.
+
+    O retorno existe para o laço não marcar como enviado um relatório que o
+    Telegram recusou: marcar mesmo assim custa o relatório do dia inteiro por
+    causa de uma falha de rede de trinta segundos. Falhou, ele tenta de novo no
+    ciclo seguinte.
+    """
     texto = montar_relatorio(fontes, cfg, titulo)
 
     destinos: list[str | int]
@@ -1411,12 +1426,15 @@ def enviar_relatorio(fontes: list[Any], cfg: dict[str, Any],
     else:
         destinos = [CHAT_ID_ATUAL]
 
+    entregue = False
     for destino in destinos:
         try:
             send_telegram(texto, chat_id=destino)
             log.info("Relatório enviado para %s.", destino)
+            entregue = True
         except requests.RequestException as exc:
             log.error("Falha enviando relatório para %s: %s", destino, exc)
+    return entregue
 
 
 # ---------------------------------------------------------------------------
@@ -1881,7 +1899,61 @@ def validate_env() -> None:
         sys.exit(1)
 
 
+def semear_sessao_facebook() -> None:
+    """Escreve a sessão do Facebook no volume a partir de FACEBOOK_STATE_B64.
+
+    Só escreve quando o arquivo ainda não existe **ou** quando o conteúdo do
+    ambiente mudou desde a última semeadura. A segunda condição não é firula: o
+    Playwright reescreve o `fb_state.json` a cada ciclo com os cookies
+    renovados, então sobrescrever a cada boot devolveria uma sessão velha ao
+    volume e derrubaria a conta sozinho depois de alguns dias.
+
+    Trocar a sessão em produção passa a ser: colar o novo base64 na variável e
+    redeployar. Como o valor muda, a semeadura acontece.
+    """
+    if not FACEBOOK_STATE_B64:
+        return
+
+    marca = DATA_DIR / ".fb_state_seed"
+    impressao = hashlib.sha256(FACEBOOK_STATE_B64.encode()).hexdigest()
+    try:
+        ja_semeada = marca.read_text(encoding="utf-8").strip()
+    except OSError:
+        ja_semeada = ""
+
+    if FACEBOOK_STATE_FILE.exists() and ja_semeada == impressao:
+        return
+
+    try:
+        bruto = base64.b64decode(FACEBOOK_STATE_B64, validate=True)
+        dados = json.loads(bruto.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError) as exc:
+        log.error("FACEBOOK_STATE_B64 não é um storage_state válido (%s) — "
+                  "a sessão do volume foi mantida como está", exc)
+        return
+
+    if not isinstance(dados, dict) or not dados.get("cookies"):
+        log.error("FACEBOOK_STATE_B64 decodificou, mas sem cookies dentro — "
+                  "a sessão do volume foi mantida como está")
+        return
+
+    try:
+        FACEBOOK_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = FACEBOOK_STATE_FILE.with_suffix(".json.tmp")
+        tmp.write_bytes(bruto)
+        tmp.replace(FACEBOOK_STATE_FILE)
+        marca.write_text(impressao, encoding="utf-8")
+    except OSError as exc:
+        log.error("Falha escrevendo a sessão do Facebook em %s: %s",
+                  FACEBOOK_STATE_FILE, exc)
+        return
+
+    log.info("Sessão do Facebook semeada a partir do ambiente em %s (%d cookies)",
+             FACEBOOK_STATE_FILE, len(dados.get("cookies") or []))
+
+
 def main() -> None:
+    semear_sessao_facebook()
     validate_env()
     fontes = build_sources()
     log.info("ADV Jobs Bot iniciando (tick=%ds, data_dir=%s)", CHECK_INTERVAL, DATA_DIR)
@@ -1983,8 +2055,8 @@ def main() -> None:
             agora = agora_local()
             dia = hoje_local()
             if agora.hour >= REPORT_HOUR and STATS.relatorio_pendente(dia):
-                enviar_relatorio(fontes, cfg)
-                STATS.marcar_relatorio_enviado(dia)
+                if enviar_relatorio(fontes, cfg):
+                    STATS.marcar_relatorio_enviado(dia)
         except Exception as exc:  # noqa: BLE001
             log.exception("Erro no relatório diário: %s", exc)
 

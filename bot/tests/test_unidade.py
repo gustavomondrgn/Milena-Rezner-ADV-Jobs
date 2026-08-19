@@ -12,6 +12,7 @@ Três coisas se encaixam nisso:
 
 Rodar: `python bot/tests/test_unidade.py`
 """
+import json
 import os
 import sys
 import tempfile
@@ -389,6 +390,204 @@ communication skills and is comfortable working under pressure every day."""
 check("inglês detectado", filters.parece_ingles("Real Estate Attorney", EN), True)
 check("português não é confundido",
       filters.parece_ingles("Advogado", DEMANDA_1 + " " + DEMANDA_3), False)
+
+# ---------------------------------------------------------------------------
+secao("RELATÓRIO DIÁRIO — a peça do ciclo que nunca tinha rodado")
+# ---------------------------------------------------------------------------
+# É a única parte do laço que só acontece uma vez por dia, às 22h: nenhum teste
+# de ciclo passava por ela, e um erro aqui não dá sintoma nenhum até a noite —
+# quando o cliente simplesmente não recebe nada e ninguém fica sabendo.
+
+import telemetry  # noqa: E402
+
+_ENVIADOS: list[tuple[str, str]] = []
+_send_real = main.send_telegram
+
+
+def _send_fake(text, chat_id=None, **kwargs):
+    _ENVIADOS.append((str(chat_id), text))
+    return {"result": {"message_id": len(_ENVIADOS)}}
+
+
+def _send_quebrado(text, chat_id=None, **kwargs):
+    raise main.requests.RequestException("timeout simulado")
+
+
+main.send_telegram = _send_fake
+_HOJE = main.hoje_local()
+main.STATS.virar_se_preciso(_HOJE)
+
+# --- dia sem nada ----------------------------------------------------------
+vazio = main.montar_relatorio([], {"daily_limit": 0})
+check("dia sem demanda avisa em vez de mandar zero",
+      "Nenhuma demanda nova hoje" in vazio, True)
+check("dia sem demanda não inventa quebra por área", "Por área" in vazio, False)
+check("dia sem demanda não mostra aviso de adiadas", "⚠️" in vazio, False)
+
+# --- dia com demanda, sem teto (o padrão deste projeto) --------------------
+for _ in range(9):
+    main.STATS.bump(_HOJE, "sent", fonte="facebook")
+for _chave, _n in (("area:imobiliario", 6), ("area:empresarial", 2),
+                   ("area:condominio", 1)):
+    main.STATS.bump(_HOJE, _chave, n=_n)
+
+sem_teto = main.montar_relatorio([], {"daily_limit": 0})
+check("sem teto: conta o enviado e não cita cota",
+      "✅ <b>9</b> demanda(s) enviadas ao grupo" in sem_teto, True)
+check("sem teto: não escreve 'de 0'", "de 0 demanda" in sem_teto, False)
+check("quebra por área aparece", "<b>Por área</b>" in sem_teto, True)
+check("só as áreas com demanda entram",
+      "Trabalhista (empresa)" in sem_teto, False)
+check("área com mais demanda vem primeiro",
+      sem_teto.index("Imobiliário") < sem_teto.index("Empresarial")
+      < sem_teto.index("Condomínio"), True)
+check("o número de cada área bate", "• Imobiliário: 6" in sem_teto, True)
+
+# --- com teto, que é o que acontece se ela ligar cota no painel ------------
+com_teto = main.montar_relatorio([], {"daily_limit": 12})
+check("com teto: mostra o enviado sobre o total",
+      "✅ <b>9</b> de 12 demanda(s) enviadas ao grupo" in com_teto, True)
+
+# --- adiada: o aviso que só pode aparecer quando existe --------------------
+main.STATS.bump(_HOJE, "adiada", n=3)
+com_adiada = main.montar_relatorio([], {"daily_limit": 0})
+check("adiada > 0 dispara o aviso de classificador fora do ar",
+      "3 post(s) não puderam ser analisados hoje" in com_adiada, True)
+
+# --- título do cliente passa por escape ------------------------------------
+escapado = main.montar_relatorio([], {"daily_limit": 0}, titulo="Fechamento & cia")
+check("título vai escapado pro HTML do Telegram",
+      "Fechamento &amp; cia" in escapado, True)
+
+# --- entrega -------------------------------------------------------------
+_ENVIADOS.clear()
+check("relatório entregue devolve True",
+      main.enviar_relatorio([], {"daily_limit": 0}), True)
+check("foi para um destino só", len(_ENVIADOS), 1)
+check("o destino é o grupo", _ENVIADOS[0][0], str(main.CHAT_ID_ATUAL))
+
+# Telegram fora do ar não pode consumir o relatório do dia: o laço só marca
+# como enviado quando algum destino confirmou.
+main.send_telegram = _send_quebrado
+check("falha de rede devolve False em vez de sumir com o relatório",
+      main.enviar_relatorio([], {"daily_limit": 0}), False)
+main.send_telegram = _send_fake
+
+# --- REPORT_TO=privado ------------------------------------------------------
+_report_to, _report_ids = main.REPORT_TO, main.REPORT_CHAT_IDS
+main.REPORT_TO = "privado"
+main.REPORT_CHAT_IDS = []
+_ENVIADOS.clear()
+main.enviar_relatorio([], {"daily_limit": 0})
+check("privado sem destino cadastrado cai no grupo, não some",
+      [destino for destino, _ in _ENVIADOS], [str(main.CHAT_ID_ATUAL)])
+
+main.REPORT_CHAT_IDS = ["6283084782"]
+_ENVIADOS.clear()
+main.enviar_relatorio([], {"daily_limit": 0})
+check("privado manda pro admin, não pro grupo",
+      [destino for destino, _ in _ENVIADOS], ["6283084782"])
+main.REPORT_TO, main.REPORT_CHAT_IDS = _report_to, _report_ids
+main.send_telegram = _send_real
+
+# --- não repetir: a trava tem de sobreviver a redeploy ---------------------
+check("hora do relatório é 22h por padrão", main.REPORT_HOUR, 22)
+check("21h ainda não é hora de relatório", 21 >= main.REPORT_HOUR, False)
+check("22h é", 22 >= main.REPORT_HOUR, True)
+
+check("pendente antes de sair", main.STATS.relatorio_pendente(_HOJE), True)
+main.STATS.marcar_relatorio_enviado(_HOJE)
+check("não sai duas vezes no mesmo dia",
+      main.STATS.relatorio_pendente(_HOJE), False)
+
+# Um redeploy às 22h30 recria o DailyStats a partir do disco. Se a marca não
+# estivesse persistida, o cliente receberia o relatório de novo a cada deploy.
+_apos_redeploy = telemetry.DailyStats(main.STATS.path)
+check("redeploy depois das 22h não remanda o relatório",
+      _apos_redeploy.relatorio_pendente(_HOJE), False)
+
+_AMANHA = (datetime.strptime(_HOJE, "%Y-%m-%d")
+           + timedelta(days=1)).strftime("%Y-%m-%d")
+check("dia novo, relatório novo", _apos_redeploy.relatorio_pendente(_AMANHA), True)
+check("a virada zera os contadores", _apos_redeploy.totais().get("sent", 0), 0)
+
+
+# ---------------------------------------------------------------------------
+secao("SESSÃO DO FACEBOOK — semeadura pelo ambiente")
+# ---------------------------------------------------------------------------
+# A sessão chega no servidor por variável de ambiente e o bot a escreve no
+# volume no boot. O erro caro aqui é o inverso do óbvio: sobrescrever DEMAIS.
+# O Playwright renova os cookies e regrava o arquivo a cada ciclo — se o boot
+# devolvesse o valor original toda vez, a conta cairia sozinha em alguns dias,
+# e o sintoma seria "o bot parou de achar post", sem erro nenhum.
+
+import base64 as _b64  # noqa: E402
+
+_SESSAO_DIR = Path(tempfile.mkdtemp(prefix="advjobs-sessao-"))
+_data_dir_real, _state_real, _b64_real = (
+    main.DATA_DIR, main.FACEBOOK_STATE_FILE, main.FACEBOOK_STATE_B64)
+main.DATA_DIR = _SESSAO_DIR
+main.FACEBOOK_STATE_FILE = _SESSAO_DIR / "fb_state.json"
+
+
+def _como_env(cookies):
+    corpo = json.dumps({"cookies": cookies, "origins": []}).encode()
+    return _b64.b64encode(corpo).decode()
+
+
+ORIGINAL = _como_env([{"name": "c_user", "value": "111"}])
+RENOVADA = _como_env([{"name": "c_user", "value": "222"}])
+
+# 1. Sem a variável, nada acontece — é o caso do desenvolvimento local, onde o
+#    arquivo já está na pasta.
+main.FACEBOOK_STATE_B64 = ""
+main.semear_sessao_facebook()
+check("sem a variável, não inventa arquivo de sessão",
+      main.FACEBOOK_STATE_FILE.exists(), False)
+
+# 2. Primeiro boot no servidor: o volume está vazio e a sessão nasce dele.
+main.FACEBOOK_STATE_B64 = ORIGINAL
+main.semear_sessao_facebook()
+check("primeiro boot escreve a sessão no volume",
+      main.FACEBOOK_STATE_FILE.exists(), True)
+check("e escreve o conteúdo certo",
+      json.loads(main.FACEBOOK_STATE_FILE.read_text(encoding="utf-8"))
+      ["cookies"][0]["value"], "111")
+
+# 3. O bot rodou e renovou os cookies. Novo boot, MESMA variável: o arquivo
+#    renovado tem de sobreviver. É a regra que este teste existe para proteger.
+main.FACEBOOK_STATE_FILE.write_text(
+    json.dumps({"cookies": [{"name": "c_user", "value": "renovado"}]}),
+    encoding="utf-8")
+main.semear_sessao_facebook()
+check("redeploy NÃO devolve a sessão velha por cima da renovada",
+      json.loads(main.FACEBOOK_STATE_FILE.read_text(encoding="utf-8"))
+      ["cookies"][0]["value"], "renovado")
+
+# 4. Alguém colou uma sessão nova na variável: aí sim sobrescreve, porque a
+#    troca foi deliberada.
+main.FACEBOOK_STATE_B64 = RENOVADA
+main.semear_sessao_facebook()
+check("variável trocada sobrescreve o volume",
+      json.loads(main.FACEBOOK_STATE_FILE.read_text(encoding="utf-8"))
+      ["cookies"][0]["value"], "222")
+
+# 5. Valor quebrado não pode destruir a sessão que está funcionando.
+main.FACEBOOK_STATE_B64 = "isto não é base64 %%%"
+main.semear_sessao_facebook()
+check("base64 inválido preserva a sessão do volume",
+      json.loads(main.FACEBOOK_STATE_FILE.read_text(encoding="utf-8"))
+      ["cookies"][0]["value"], "222")
+
+main.FACEBOOK_STATE_B64 = _b64.b64encode(b'{"origins": []}').decode()
+main.semear_sessao_facebook()
+check("JSON sem cookies preserva a sessão do volume",
+      json.loads(main.FACEBOOK_STATE_FILE.read_text(encoding="utf-8"))
+      ["cookies"][0]["value"], "222")
+
+main.DATA_DIR, main.FACEBOOK_STATE_FILE, main.FACEBOOK_STATE_B64 = (
+    _data_dir_real, _state_real, _b64_real)
+
 
 # ---------------------------------------------------------------------------
 print()
