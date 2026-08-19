@@ -127,6 +127,16 @@ class BaseSource:
             return True
         return (agora - self._last_fetch) >= self.interval_seconds
 
+    def forcar_proxima(self) -> None:
+        """Faz a fonte ficar "na hora" de novo, agora.
+
+        O agendador marca o horario ANTES de tentar, para uma fonte com defeito
+        nao ser martelada a cada ciclo. Isso e certo para defeito — e errado
+        para defeito RESOLVIDO: depois de renovar a sessao do Facebook,
+        aguardar os 30 minutos do intervalo e meia hora de silencio sem motivo.
+        """
+        self._last_fetch = None
+
     def mark_fetched(self, agora: float) -> None:
         self._last_fetch = agora
         self.last_fetch_at = datetime.now(timezone.utc)

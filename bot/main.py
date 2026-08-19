@@ -1682,6 +1682,10 @@ def coletar(fontes: list[Any], cfg: dict[str, Any]) -> tuple[list[Job], set[str]
             # Antes de incomodar alguém, tentar resolver: refazer o login aqui
             # no servidor é o que devolve a coleta sem ninguém no teclado.
             if tentar_renovar_sessao(fonte):
+                # Sessao de volta: a fonte volta a ficar "na hora" agora, em vez
+                # de cumprir os 30 minutos do intervalo dela por um erro que ja
+                # foi resolvido.
+                fonte.forcar_proxima()
                 continue
 
             if STATS.marcar_alerta(f"auth:{fonte.name}", hoje_local()):
