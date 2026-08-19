@@ -2180,6 +2180,26 @@ def main() -> None:
         entregar_codigo=CODIGO_PENDENTE.entregar,
     ).start()
 
+    # Aviso de subida, para o privado de quem mantem.
+    #
+    # Nao e enfeite: o log deste container nao sai da maquina (a API do Coolify
+    # devolve o do painel), entao "o bot esta de pe?" era pergunta sem resposta.
+    # Um bot que quebra no import reinicia em laco e fica MUDO — e mudo e
+    # exatamente como um bot saudavel num dia sem post se parece. Esta linha
+    # separa os dois casos em um segundo.
+    try:
+        grupos = len(next((f.grupos() for f in fontes
+                           if hasattr(f, "grupos")), []) or [])
+    except Exception:  # noqa: BLE001
+        grupos = 0
+    alertar_operacao(
+        "Bot no ar.\n"
+        f"• sessao do Facebook: {'presente' if FACEBOOK_STATE_FILE.exists() else 'AUSENTE'}\n"
+        f"• grupos configurados: {grupos}\n"
+        f"• religacao automatica: {'ligada' if RELOGIN_AUTOMATICO else 'desligada'}\n"
+        f"• filtro: {'ligado' if (profile and client) else 'DESLIGADO'}"
+    )
+
     log.info("Relatório diário às %dh (%s), destino: %s",
              REPORT_HOUR, TIMEZONE_NAME, REPORT_TO)
     if ACAO_VAGA_ENCERRADA == "nada":
