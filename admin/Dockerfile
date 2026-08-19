@@ -19,6 +19,16 @@ COPY admin/ ./
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
+# --- 2b. dependências dos scripts de manutenção ----------------------------
+# Fora da árvore do `standalone` de propósito. O node_modules que o Next gera é
+# podado pelo tracing dos imports do servidor: `bcryptjs` e `pg` não sobrevivem
+# lá, e um script de manutenção que os importe morre com ERR_MODULE_NOT_FOUND.
+# Como ESM ignora NODE_PATH, a saída é os scripts morarem ao lado do próprio
+# node_modules, em /opt/manut.
+FROM node:22-alpine AS manut
+WORKDIR /opt/manut
+RUN npm init -y > /dev/null  && npm install --no-fund --no-audit bcryptjs@2.4.3 pg@8.13.1
+
 # --- 3. execução -----------------------------------------------------------
 FROM node:22-alpine AS runner
 WORKDIR /app
@@ -32,10 +42,13 @@ RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# Scripts de manutenção (criar usuário, aplicar schema), para rodar por
-# `docker exec` sem precisar de outra imagem.
-COPY --from=builder --chown=nextjs:nodejs /app/scripts ./scripts
-COPY --chown=nextjs:nodejs db/ ./db/
+# Scripts de manutenção (criar usuário, aplicar schema) com as dependências
+# deles ao lado, em /opt/manut. Rodam por `docker exec` sem precisar de outra
+# imagem:  docker exec adv-jobs-admin node /opt/manut/scripts/criar-usuario.mjs
+COPY --from=manut --chown=nextjs:nodejs /opt/manut/node_modules /opt/manut/node_modules
+COPY --from=manut --chown=nextjs:nodejs /opt/manut/package.json /opt/manut/package.json
+COPY --from=builder --chown=nextjs:nodejs /app/scripts /opt/manut/scripts
+COPY --chown=nextjs:nodejs db/ /opt/manut/db/
 
 USER nextjs
 EXPOSE 3000
@@ -47,4 +60,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=25s --retries=3 \
 # A semeadura do primeiro usuário roda antes do servidor e nunca o impede de
 # subir (`;`, não `&&`): painel no ar sem usuário ainda dá para consertar; painel
 # que não sobe, não.
-CMD ["sh", "-c", "node scripts/semear-usuario.mjs; node server.js"]
+CMD ["sh", "-c", "node /opt/manut/scripts/semear-usuario.mjs; node server.js"]
