@@ -25,6 +25,19 @@ O que você precisa fazer, uma vez:
 3. **Entrar em todos os grupos** que o bot vai ler, com essa mesma conta. O bot
    só enxerga grupo do qual a conta já é membro — ele não pede para entrar.
 
+QUANDO O FACEBOOK PEDE CAPTCHA NO SERVIDOR
+------------------------------------------
+Login novo vindo de datacenter dispara o desafio da Arkose ("verifique se você
+é humano"), que script nenhum resolve. A saída é fazer o login aqui, na mão,
+mas **saindo pelo IP do servidor**:
+
+    ssh -D 1080 -N usuario@ip-da-vps           # noutra janela, deixa aberto
+    python bot/tools/facebook_login.py --proxy socks5://127.0.0.1:1080
+
+Você resolve o CAPTCHA e o 2FA na janela; a sessão nasce com o IP da VPS, que é
+o mesmo IP de onde o bot vai navegar depois. Aí `sessao_para_env.py` e colar em
+FACEBOOK_STATE_B64.
+
 Para trocar a conta depois (por exemplo: sair da sua e passar para uma
 descartável), é só rodar de novo com a conta nova. O arquivo é sobrescrito.
 
@@ -63,7 +76,7 @@ TEXTOS_COOKIE = (
 )
 
 
-OPCOES_COM_VALOR = ("--email", "--senha", "--espera")
+OPCOES_COM_VALOR = ("--email", "--senha", "--espera", "--proxy")
 
 
 def _console_utf8() -> None:
@@ -198,6 +211,7 @@ def main() -> int:
     email = opcoes.get("--email") or os.getenv("FB_EMAIL", "").strip()
     senha = opcoes.get("--senha") or os.getenv("FB_PASSWORD", "").strip()
     espera = int(opcoes.get("--espera") or ESPERA_PADRAO_S)
+    proxy = (opcoes.get("--proxy") or os.getenv("FACEBOOK_PROXY", "")).strip()
     assistido = bool(email and senha)
 
     try:
@@ -215,11 +229,19 @@ def main() -> int:
     print(f"Modo: {'assistido (credencial do .env)' if assistido else 'manual'}")
     if assistido:
         print(f"Conta: {email}")
+    if proxy:
+        print(f"Saindo por: {proxy}")
     print()
 
     with sync_playwright() as pw:
+        # `--proxy socks5://127.0.0.1:1080` faz esta janela sair pela VPS (via
+        # `ssh -D 1080`). Serve para o caso especifico em que o Facebook
+        # responde com CAPTCHA a login vindo de datacenter: aqui quem resolve o
+        # CAPTCHA e uma pessoa, e mesmo assim a sessao nasce com o IP do
+        # servidor — que e o IP que vai navegar depois.
         navegador = pw.chromium.launch(
             headless=False,
+            proxy={"server": proxy} if proxy else None,
             args=["--disable-blink-features=AutomationControlled"],
         )
         contexto = navegador.new_context(

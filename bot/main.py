@@ -168,6 +168,10 @@ RELOGIN_INTERVALO_H = float(os.getenv("RELOGIN_INTERVALO_H", "6"))
 CODIGO_PENDENTE = relogin.CodigoPendente()
 MARCA_RELOGIN = DATA_DIR / ".ultima_renovacao"
 
+# Saida de rede do navegador do bot. Vazio = direto. Serve para o trafego nao
+# sair de um datacenter, que e o que dispara CAPTCHA no login do Facebook.
+FACEBOOK_PROXY = os.getenv("FACEBOOK_PROXY", "").strip()
+
 FACEBOOK_MAX_POSTS = int(os.getenv("FACEBOOK_MAX_POSTS", "25"))
 FACEBOOK_SCROLLS = int(os.getenv("FACEBOOK_SCROLLS", "4"))
 
@@ -1622,6 +1626,7 @@ def build_sources() -> list[Any]:
             ativas.append(FacebookSource(
                 groups_file=FACEBOOK_GROUPS_FILE,
                 state_file=FACEBOOK_STATE_FILE,
+                proxy=FACEBOOK_PROXY,
                 interval_seconds=_interval_for("facebook", FacebookSource.default_interval),
                 max_posts_por_grupo=FACEBOOK_MAX_POSTS,
                 scrolls=FACEBOOK_SCROLLS,

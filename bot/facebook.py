@@ -500,8 +500,15 @@ class FacebookSource(BaseSource):
                  interval_seconds: int | None = None,
                  max_posts_por_grupo: int = 25,
                  scrolls: int = 4,
-                 headless: bool = True) -> None:
+                 headless: bool = True,
+                 proxy: str = "") -> None:
         super().__init__(interval_seconds)
+        # Saida de rede do navegador. Existe por um motivo especifico: o
+        # Facebook trata login vindo de datacenter como suspeito e responde com
+        # CAPTCHA da Arkose, que script nenhum resolve. Apontando para um proxy
+        # residencial (ou para um tunel que sai pelo IP certo), o trafego deixa
+        # de vir de onde ele desconfia.
+        self.proxy = proxy.strip()
         self.groups_file = groups_file
         self.state_file = state_file
         self.max_posts_por_grupo = max_posts_por_grupo
@@ -562,6 +569,7 @@ class FacebookSource(BaseSource):
         with sync_playwright() as pw:
             navegador = pw.chromium.launch(
                 headless=self.headless,
+                proxy={"server": self.proxy} if self.proxy else None,
                 args=["--disable-blink-features=AutomationControlled",
                       "--no-sandbox", "--disable-dev-shm-usage"],
             )
@@ -874,6 +882,7 @@ class FacebookSource(BaseSource):
         with sync_playwright() as pw:
             navegador = pw.chromium.launch(
                 headless=self.headless,
+                proxy={"server": self.proxy} if self.proxy else None,
                 args=[
                     # Sem isto o `navigator.webdriver` entrega o navegador de cara.
                     "--disable-blink-features=AutomationControlled",
@@ -1045,6 +1054,7 @@ class FacebookSource(BaseSource):
         with sync_playwright() as pw:
             navegador = pw.chromium.launch(
                 headless=self.headless,
+                proxy={"server": self.proxy} if self.proxy else None,
                 args=["--disable-blink-features=AutomationControlled",
                       "--no-sandbox", "--disable-dev-shm-usage"],
             )
