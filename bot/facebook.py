@@ -686,23 +686,34 @@ class FacebookSource(BaseSource):
                 return False
             self._anotar_fase(pagina, "depois-do-codigo")
 
-        # "Salvar navegador?" — salvar e o que evita repetir isto a cada login.
-        self._confirmar_dispositivo(pagina)
+        # Depois do codigo vem uma fila de telas de confirmacao — "Salvar
+        # navegador?", "Foi voce?", "Continuar" — e elas nao vem sempre na mesma
+        # ordem nem na mesma quantidade. Atravessar UMA so, como antes, deixava
+        # o fluxo parado na segunda e a prova final concluia "ainda no
+        # checkpoint" com a sessao praticamente pronta.
+        for volta in range(4):
+            url_atual = (pagina.url or "").lower()
+            if "checkpoint" not in url_atual and "two_factor" not in url_atual:
+                break
+            self._anotar_fase(pagina, f"checkpoint-{volta + 1}")
+            if not self._submeter(pagina, campo_para_enter="body"):
+                break
+            pagina.wait_for_timeout(6000)
 
         # A prova real: uma pagina logada que nao redireciona para o login.
         pagina.goto("https://www.facebook.com/groups/feed/",
                     wait_until="domcontentloaded", timeout=60_000)
         url = (pagina.url or "").lower()
         self._anotar_fase(pagina, "prova-final")
-        if any(sinal in url for sinal in _SINAIS_LOGIN):
-            log.error("Depois do login o Facebook ainda manda para %s — "
-                      "provavelmente checkpoint que exige gente.", pagina.url)
-            self._fotografar(pagina)
-            return False
-
         cookies = {c["name"] for c in contexto.cookies()}
         if "c_user" not in cookies:
             log.error("Login terminou sem o cookie de sessao (c_user).")
+            self._fotografar(pagina)
+            return False
+
+        if any(sinal in url for sinal in _SINAIS_LOGIN):
+            log.error("Depois do login o Facebook ainda manda para %s — "
+                      "checkpoint que exige gente.", pagina.url)
             self._fotografar(pagina)
             return False
 
@@ -835,25 +846,6 @@ class FacebookSource(BaseSource):
         pagina.wait_for_timeout(8000)
         log.info("Codigo enviado — pagina agora: %s", pagina.url)
         return True
-
-    @staticmethod
-    def _confirmar_dispositivo(pagina: Any) -> None:
-        """Aceita o "salvar navegador" quando ele aparece.
-
-        Salvar e o que faz o PROXIMO login nao pedir codigo de novo. Recusar
-        transformaria cada renovacao num pedido de codigo no Telegram.
-        """
-        for _ in range(2):
-            try:
-                if "checkpoint" not in (pagina.url or "").lower():
-                    return
-                botao = pagina.locator('#checkpointSubmitButton, button[type="submit"]')
-                if not botao.count():
-                    return
-                botao.first.click(timeout=10_000)
-                pagina.wait_for_timeout(5000)
-            except Exception:  # noqa: BLE001
-                return
 
     # -- coleta -------------------------------------------------------------
 

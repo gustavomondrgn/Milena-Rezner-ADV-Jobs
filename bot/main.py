@@ -1495,8 +1495,12 @@ def tentar_renovar_sessao(fonte: Any) -> bool:
 
     # Falhou: mandar o que a tela mostrava, nao so o aviso. Uma vez por dia,
     # como qualquer alerta de operacao — captura repetida vira ruido igual.
+    # Sem trava de "um por dia" aqui, de proposito: as tentativas ja sao
+    # limitadas por RELOGIN_INTERVALO_H, e a captura da falha e o unico dado que
+    # permite consertar o proximo ponto. Segurar a segunda captura foi o que me
+    # deixou cego justamente na hora de iterar.
     diag = getattr(fonte, "ultimo_diagnostico", None) or {}
-    if diag and STATS.marcar_alerta(f"relogin:{fonte.name}", hoje_local()):
+    if diag:
         fases = " → ".join(
             f"{f.get('fase')}: {f.get('url', '')[:70]}"
             for f in diag.get("fases", [])
