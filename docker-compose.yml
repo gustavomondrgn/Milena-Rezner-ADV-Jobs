@@ -34,6 +34,20 @@ services:
       dockerfile: bot/Dockerfile
     container_name: adv-jobs-bot
     restart: unless-stopped
+    # Rota da estacao de login (bot/entrada.sh com MODO_LOGIN=1). Fora desse
+    # modo ninguem escuta na 8080 e o endereco simplesmente nao responde — que
+    # e o comportamento desejado: navegador logado nao fica exposto de graca.
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=coolify
+      - traefik.http.routers.advlogin.entrypoints=https
+      - traefik.http.routers.advlogin.rule=Host(`${LOGIN_DOMAIN:-login.localhost}`)
+      - traefik.http.routers.advlogin.tls=true
+      - traefik.http.routers.advlogin.tls.certresolver=letsencrypt
+      - traefik.http.routers.advlogin.service=advlogin
+      - traefik.http.services.advlogin.loadbalancer.server.port=8080
+    expose:
+      - "8080"
     # NÃO usar `env_file: .env` — o .env está no .gitignore, então ele não existe
     # no repositório que o Coolify clona e o compose quebra antes de subir.
     # Com substituição de variáveis funciona nos dois casos: local o compose lê
@@ -74,6 +88,10 @@ services:
       # bot sao o mesmo aparelho aos olhos do Facebook — que e o que evita a
       # tela "Continuar como Fulano" a cada ciclo.
       - FACEBOOK_PROFILE_DIR=${FACEBOOK_PROFILE_DIR:-/app/data/perfil-chrome}
+      # MODO_LOGIN=1 troca o bot pela estacao de login (tela via noVNC). Fica
+      # ligado o tempo de um login e volta a 0.
+      - MODO_LOGIN=${MODO_LOGIN:-0}
+      - VNC_PASSWORD=${VNC_PASSWORD:-}
       # Credencial para o bot REFAZER o login sozinho, aqui dentro, quando a
       # sessão cair. É o que separa "caiu de madrugada e voltou" de "caiu e
       # alguém precisa perceber". Sem estas, a sessão só volta na mão.
