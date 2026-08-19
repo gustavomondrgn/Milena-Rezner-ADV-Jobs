@@ -645,10 +645,10 @@ class FacebookSource(BaseSource):
             log.info("Tela de reconfirmacao de senha (a conta ja e conhecida).")
 
         pagina.fill('input[name="pass"], input[type="password"]', senha, timeout=30_000)
-        pagina.click(
-            'button[name="login"], button[type="submit"], #checkpointSubmitButton',
-            timeout=30_000)
-        pagina.wait_for_timeout(6000)
+        if not self._submeter(pagina):
+            self._fotografar(pagina)
+            return False
+        pagina.wait_for_timeout(8000)
         self._anotar_fase(pagina, "depois-do-login")
 
         # A reconfirmacao pode vir DEPOIS do login, na pagina seguinte. Mesma
@@ -658,8 +658,7 @@ class FacebookSource(BaseSource):
             try:
                 pagina.fill('input[name="pass"], input[type="password"]', senha,
                             timeout=20_000)
-                pagina.click('button[type="submit"], #checkpointSubmitButton',
-                             timeout=20_000)
+                self._submeter(pagina)
                 pagina.wait_for_timeout(6000)
                 log.info("Reconfirmacao enviada — pagina agora: %s", pagina.url)
             except Exception as exc:  # noqa: BLE001
@@ -726,6 +725,49 @@ class FacebookSource(BaseSource):
                 continue
 
     @staticmethod
+    def _submeter(pagina: Any, campo_para_enter: str = 'input[name="pass"]') -> bool:
+        """Envia o formulario sem depender da marcacao do botao.
+
+        O botao "Entrar" do Facebook ja foi `button[name=login]`,
+        `#loginbutton` e `[data-testid=royal_login_button]`, e na tela de 2026 e
+        outra coisa ainda. Foi exatamente isso que derrubou a primeira
+        renovacao em producao: e-mail e senha preenchidos, e o clique estourando
+        30 segundos esperando um seletor que nao existe mais.
+
+        Entao: tentativas curtas nos seletores conhecidos e, se nenhum casar,
+        **Enter no campo de senha** — que submete o formulario desde sempre e
+        nao tem marcacao para mudar.
+        """
+        seletores = (
+            'button[name="login"]',
+            '#loginbutton',
+            '[data-testid="royal_login_button"]',
+            'button[type="submit"]',
+            '#checkpointSubmitButton',
+            'div[role="button"][aria-label="Entrar"]',
+            'div[role="button"]:has-text("Entrar")',
+            'button:has-text("Entrar")',
+            'button:has-text("Continuar")',
+        )
+        for seletor in seletores:
+            try:
+                alvo = pagina.locator(seletor)
+                if not alvo.count():
+                    continue
+                alvo.first.click(timeout=5000)
+                log.info("Formulario enviado pelo seletor %s", seletor)
+                return True
+            except Exception:  # noqa: BLE001
+                continue
+        try:
+            pagina.press(campo_para_enter, "Enter")
+            log.info("Formulario enviado com Enter (nenhum botao casou).")
+            return True
+        except Exception as exc:  # noqa: BLE001
+            log.error("Nao consegui enviar o formulario: %s", exc)
+            return False
+
+    @staticmethod
     def _pede_so_a_senha(pagina: Any) -> bool:
         """A tela "Insira sua senha para continuar": senha sem e-mail."""
         try:
@@ -771,32 +813,25 @@ class FacebookSource(BaseSource):
 
     @staticmethod
     def _enviar_codigo(pagina: Any, codigo: str) -> bool:
-        preenchido = False
+        seletor_usado = ""
         for seletor in ('input[name="approvals_code"]',
                         'input[autocomplete="one-time-code"]',
-                        'input[name="code"]'):
+                        'input[name="code"]',
+                        'input[type="text"]'):
             try:
                 campo = pagina.locator(seletor)
                 if not campo.count():
                     continue
                 campo.first.fill(codigo, timeout=15_000)
-                preenchido = True
+                seletor_usado = seletor
                 break
             except Exception:  # noqa: BLE001
                 continue
-        if not preenchido:
+        if not seletor_usado:
             log.error("Nao achei onde digitar o codigo.")
             return False
 
-        for seletor in ('#checkpointSubmitButton', 'button[type="submit"]',
-                        'div[role="button"]:has-text("Continuar")'):
-            try:
-                botao = pagina.locator(seletor)
-                if botao.count():
-                    botao.first.click(timeout=15_000)
-                    break
-            except Exception:  # noqa: BLE001
-                continue
+        FacebookSource._submeter(pagina, campo_para_enter=seletor_usado)
         pagina.wait_for_timeout(8000)
         log.info("Codigo enviado — pagina agora: %s", pagina.url)
         return True
