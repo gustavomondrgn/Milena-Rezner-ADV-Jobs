@@ -176,6 +176,15 @@ MARCA_RELOGIN = DATA_DIR / ".ultima_renovacao"
 # sair de um datacenter, que e o que dispara CAPTCHA no login do Facebook.
 FACEBOOK_PROXY = os.getenv("FACEBOOK_PROXY", "").strip()
 
+# Pasta do perfil do Chromium, no volume. Vazio = comportamento antigo (so os
+# cookies do fb_state.json num navegador zerado).
+#
+# Com perfil, o login feito na estacao e o bot rodando depois sao o MESMO
+# navegador — mesmo localStorage, mesmo IndexedDB, mesmo tudo. E o que separa
+# "aparelho conhecido" de "alguem com os cookies certos", que e o que o
+# Facebook responde com a tela "Continuar como Fulano".
+FACEBOOK_PROFILE_DIR = os.getenv("FACEBOOK_PROFILE_DIR", "").strip()
+
 FACEBOOK_MAX_POSTS = int(os.getenv("FACEBOOK_MAX_POSTS", "25"))
 FACEBOOK_SCROLLS = int(os.getenv("FACEBOOK_SCROLLS", "4"))
 
@@ -1631,6 +1640,7 @@ def build_sources() -> list[Any]:
                 groups_file=FACEBOOK_GROUPS_FILE,
                 state_file=FACEBOOK_STATE_FILE,
                 proxy=FACEBOOK_PROXY,
+                profile_dir=FACEBOOK_PROFILE_DIR,
                 interval_seconds=_interval_for("facebook", FacebookSource.default_interval),
                 max_posts_por_grupo=FACEBOOK_MAX_POSTS,
                 scrolls=FACEBOOK_SCROLLS,

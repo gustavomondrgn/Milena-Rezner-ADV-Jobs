@@ -76,7 +76,7 @@ TEXTOS_COOKIE = (
 )
 
 
-OPCOES_COM_VALOR = ("--email", "--senha", "--espera", "--proxy")
+OPCOES_COM_VALOR = ("--email", "--senha", "--espera", "--proxy", "--perfil")
 
 
 def _console_utf8() -> None:
@@ -201,6 +201,22 @@ def _esperar_sessao(pagina, contexto, limite_s: int) -> bool:
     return _tem_sessao(contexto)
 
 
+def _fechar(navegador, contexto) -> None:
+    """Fecha os dois, na ordem certa, com o navegador podendo nao existir.
+
+    Com perfil persistente o Playwright nao devolve um objeto de navegador — o
+    contexto E o navegador. Fechar na ordem errada perde o que o perfil ainda
+    nao gravou no disco, e o perfil e justamente o que estamos tentando manter.
+    """
+    for peca in (contexto, navegador):
+        if peca is None:
+            continue
+        try:
+            peca.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def main() -> int:
     _console_utf8()
     _carregar_env()
@@ -212,6 +228,7 @@ def main() -> int:
     senha = opcoes.get("--senha") or os.getenv("FB_PASSWORD", "").strip()
     espera = int(opcoes.get("--espera") or ESPERA_PADRAO_S)
     proxy = (opcoes.get("--proxy") or os.getenv("FACEBOOK_PROXY", "")).strip()
+    perfil = (opcoes.get("--perfil") or os.getenv("FACEBOOK_PROFILE_DIR", "")).strip()
     assistido = bool(email and senha)
 
     try:
@@ -239,12 +256,11 @@ def main() -> int:
         # responde com CAPTCHA a login vindo de datacenter: aqui quem resolve o
         # CAPTCHA e uma pessoa, e mesmo assim a sessao nasce com o IP do
         # servidor — que e o IP que vai navegar depois.
-        navegador = pw.chromium.launch(
-            headless=False,
-            proxy={"server": proxy} if proxy else None,
-            args=["--disable-blink-features=AutomationControlled"],
-        )
-        contexto = navegador.new_context(
+        # `--perfil` faz o login acontecer DENTRO da pasta de perfil que o bot
+        # usa depois. E o que transforma "outro navegador com os cookies certos"
+        # em "o mesmo aparelho de sempre" — a diferenca entre coletar e receber
+        # a tela "Continuar como Fulano" a cada ciclo.
+        opcoes_ctx = dict(
             locale="pt-BR",
             timezone_id="America/Sao_Paulo",
             viewport={"width": 1366, "height": 900},
@@ -253,10 +269,29 @@ def main() -> int:
                 "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
             ),
         )
+        args = ["--disable-blink-features=AutomationControlled",
+                "--no-sandbox", "--disable-dev-shm-usage"]
+
+        if perfil:
+            print(f"Perfil do navegador: {perfil}")
+            navegador = None
+            contexto = pw.chromium.launch_persistent_context(
+                perfil, headless=False,
+                proxy={"server": proxy} if proxy else None,
+                args=args, **opcoes_ctx,
+            )
+        else:
+            navegador = pw.chromium.launch(
+                headless=False,
+                proxy={"server": proxy} if proxy else None,
+                args=args,
+            )
+            contexto = navegador.new_context(**opcoes_ctx)
+
         contexto.add_init_script(
             "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
         )
-        pagina = contexto.new_page()
+        pagina = contexto.pages[0] if contexto.pages else contexto.new_page()
 
         if assistido:
             print("Preenchendo o formulário de login...")
@@ -294,7 +329,7 @@ def main() -> int:
                 print()
                 print(f"ERRO: ainda não está logado (a página foi para {pagina.url}).")
                 print("Nada foi salvo. Rode de novo e conclua o login.")
-                navegador.close()
+                _fechar(navegador, contexto)
                 return 1
 
         if not _tem_sessao(contexto):
@@ -302,12 +337,12 @@ def main() -> int:
             print("ERRO: o cookie de sessão (c_user) não apareceu. Nada foi salvo.")
             print("Se o Facebook pediu confirmação e o tempo acabou, rode de novo")
             print("com mais folga:  --espera 900")
-            navegador.close()
+            _fechar(navegador, contexto)
             return 1
 
         destino.parent.mkdir(parents=True, exist_ok=True)
         contexto.storage_state(path=str(destino))
-        navegador.close()
+        _fechar(navegador, contexto)
 
     print()
     print("=" * 70)

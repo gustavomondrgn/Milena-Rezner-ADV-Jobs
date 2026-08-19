@@ -501,7 +501,8 @@ class FacebookSource(BaseSource):
                  max_posts_por_grupo: int = 25,
                  scrolls: int = 4,
                  headless: bool = True,
-                 proxy: str = "") -> None:
+                 proxy: str = "",
+                 profile_dir: str = "") -> None:
         super().__init__(interval_seconds)
         # Saida de rede do navegador. Existe por um motivo especifico: o
         # Facebook trata login vindo de datacenter como suspeito e responde com
@@ -509,6 +510,18 @@ class FacebookSource(BaseSource):
         # residencial (ou para um tunel que sai pelo IP certo), o trafego deixa
         # de vir de onde ele desconfia.
         self.proxy = proxy.strip()
+        # Pasta de perfil do Chromium, guardada no volume.
+        #
+        # É a diferença entre "outro aparelho com os cookies certos" e "o mesmo
+        # aparelho de sempre". O Facebook nao reconhece so o cookie: reconhece o
+        # conjunto — localStorage, IndexedDB, service workers, o que o perfil
+        # guarda. Carregar so o `storage_state` num contexto novo produz a tela
+        # "Continuar como Fulano", que e o Facebook dizendo "reconheco a conta,
+        # nao reconheco o aparelho".
+        #
+        # Com o perfil no volume, o login feito na estacao e o bot rodando
+        # depois sao literalmente o mesmo navegador.
+        self.profile_dir = profile_dir.strip()
         self.groups_file = groups_file
         self.state_file = state_file
         self.max_posts_por_grupo = max_posts_por_grupo
@@ -539,6 +552,72 @@ class FacebookSource(BaseSource):
             self._grupos_mtime = mtime
         return self._grupos
 
+    # -- navegador ----------------------------------------------------------
+
+    _ARGS_NAVEGADOR = [
+        # Sem isto o `navigator.webdriver` entrega o navegador de cara.
+        "--disable-blink-features=AutomationControlled",
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+    ]
+
+    def _opcoes_contexto(self) -> dict:
+        return {
+            "locale": "pt-BR",
+            "timezone_id": "America/Sao_Paulo",
+            "viewport": {"width": 1366, "height": 900},
+            "user_agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            ),
+        }
+
+    def _abrir(self, pw: Any, com_sessao: bool = True) -> tuple[Any, Any]:
+        """Devolve (navegador, contexto). Com perfil, navegador vem None.
+
+        Duas formas de abrir, e a escolha importa mais do que parece:
+
+        * **perfil persistente** (`profile_dir`): o mesmo aparelho de sempre,
+          com tudo que um navegador acumula. E o que o Facebook reconhece.
+        * **storage_state**: so os cookies num navegador zerado. Funciona de
+          casa e cai na tela de confirmacao quando roda noutro lugar.
+        """
+        if self.profile_dir:
+            contexto = pw.chromium.launch_persistent_context(
+                self.profile_dir,
+                headless=self.headless,
+                proxy={"server": self.proxy} if self.proxy else None,
+                args=self._ARGS_NAVEGADOR,
+                **self._opcoes_contexto(),
+            )
+            contexto.add_init_script(
+                "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
+            )
+            return None, contexto
+
+        navegador = pw.chromium.launch(
+            headless=self.headless,
+            proxy={"server": self.proxy} if self.proxy else None,
+            args=self._ARGS_NAVEGADOR,
+        )
+        opcoes = self._opcoes_contexto()
+        if com_sessao:
+            opcoes["storage_state"] = str(self.state_file)
+        contexto = navegador.new_context(**opcoes)
+        contexto.add_init_script(
+            "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
+        )
+        return navegador, contexto
+
+    def _fechar(self, navegador: Any, contexto: Any) -> None:
+        for peca in (contexto, navegador):
+            if peca is None:
+                continue
+            try:
+                peca.close()
+            except Exception:  # noqa: BLE001
+                pass
+
     # -- renovacao da sessao ------------------------------------------------
 
     def renovar_sessao(self, email: str, senha: str,
@@ -567,26 +646,10 @@ class FacebookSource(BaseSource):
 
         log.info("Tentando renovar a sessao do Facebook a partir do servidor...")
         with sync_playwright() as pw:
-            navegador = pw.chromium.launch(
-                headless=self.headless,
-                proxy={"server": self.proxy} if self.proxy else None,
-                args=["--disable-blink-features=AutomationControlled",
-                      "--no-sandbox", "--disable-dev-shm-usage"],
-            )
-            # Sessao nova, sem carregar a antiga: a antiga e justamente a que o
-            # Facebook recusou, e reaproveita-la traria o checkpoint junto.
-            contexto = navegador.new_context(
-                locale="pt-BR",
-                timezone_id="America/Sao_Paulo",
-                viewport={"width": 1366, "height": 900},
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-                ),
-            )
-            contexto.add_init_script(
-                "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
-            )
+            # Sem carregar a sessao antiga: ela e justamente a que o Facebook
+            # recusou. Com perfil persistente, porem, o login acontece DENTRO do
+            # perfil de sempre — que e o que faz o aparelho continuar o mesmo.
+            navegador, contexto = self._abrir(pw, com_sessao=False)
             # Que sessao e esta, afinal? Sem isto, "a sessao caiu" nao distingue
             # arquivo velho, arquivo sem o cookie de sessao (`xs`) e sessao
             # completa sendo recusada — e cada um desses tem conserto diferente.
@@ -601,11 +664,7 @@ class FacebookSource(BaseSource):
                 self._fotografar(pagina)
                 return False
             finally:
-                try:
-                    contexto.close()
-                    navegador.close()
-                except Exception:  # noqa: BLE001
-                    pass
+                self._fechar(navegador, contexto)
 
     def _anotar_sessao(self, contexto: Any) -> None:
         try:
@@ -945,7 +1004,7 @@ class FacebookSource(BaseSource):
                 f"Nenhum grupo configurado em {self.groups_file}. "
                 "Preencha o arquivo com as URLs dos grupos."
             )
-        if not self.state_file.exists():
+        if not self.profile_dir and not self.state_file.exists():
             raise AuthError(
                 f"Sessão do Facebook não encontrada em {self.state_file}. "
                 "Rode `python bot/tools/facebook_login.py` para criar."
@@ -961,29 +1020,7 @@ class FacebookSource(BaseSource):
 
         jobs: list[Job] = []
         with sync_playwright() as pw:
-            navegador = pw.chromium.launch(
-                headless=self.headless,
-                proxy={"server": self.proxy} if self.proxy else None,
-                args=[
-                    # Sem isto o `navigator.webdriver` entrega o navegador de cara.
-                    "--disable-blink-features=AutomationControlled",
-                    "--no-sandbox",
-                    "--disable-dev-shm-usage",
-                ],
-            )
-            contexto = navegador.new_context(
-                storage_state=str(self.state_file),
-                locale="pt-BR",
-                timezone_id="America/Sao_Paulo",
-                viewport={"width": 1366, "height": 900},
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-                ),
-            )
-            contexto.add_init_script(
-                "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
-            )
+            navegador, contexto = self._abrir(pw)
             pagina = contexto.new_page()
 
             try:
@@ -1006,8 +1043,7 @@ class FacebookSource(BaseSource):
                     contexto.storage_state(path=str(self.state_file))
                 except Exception as exc:  # noqa: BLE001
                     log.debug("Não consegui regravar a sessão: %s", exc)
-                contexto.close()
-                navegador.close()
+                self._fechar(navegador, contexto)
 
         return jobs
 
@@ -1155,25 +1191,7 @@ class FacebookSource(BaseSource):
 
         resultado: dict[str, str] = {}
         with sync_playwright() as pw:
-            navegador = pw.chromium.launch(
-                headless=self.headless,
-                proxy={"server": self.proxy} if self.proxy else None,
-                args=["--disable-blink-features=AutomationControlled",
-                      "--no-sandbox", "--disable-dev-shm-usage"],
-            )
-            contexto = navegador.new_context(
-                storage_state=str(self.state_file),
-                locale="pt-BR",
-                timezone_id="America/Sao_Paulo",
-                viewport={"width": 1366, "height": 900},
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-                ),
-            )
-            contexto.add_init_script(
-                "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
-            )
+            navegador, contexto = self._abrir(pw)
             pagina = contexto.new_page()
 
             for i, (uid, url) in enumerate(urls.items()):
@@ -1185,8 +1203,7 @@ class FacebookSource(BaseSource):
                 contexto.storage_state(path=str(self.state_file))
             except Exception:  # noqa: BLE001
                 pass
-            contexto.close()
-            navegador.close()
+            self._fechar(navegador, contexto)
 
         fechadas = sum(1 for e in resultado.values() if e == "fechada")
         log.info("Revisão de posts: %d checado(s), %d sem conteúdo, %d inconclusivo(s)",

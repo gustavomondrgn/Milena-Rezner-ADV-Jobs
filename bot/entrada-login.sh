@@ -37,7 +37,9 @@ sleep 1
 # comecou do zero. Parecia que tinha deslogado. Era o oposto: a ferramenta so
 # fecha DEPOIS de confirmar a sessao e grava-la.
 echo "[estacao] abrindo a janela de login do Facebook"
-if python tools/facebook_login.py "${DATA_DIR}/fb_state.json" --espera 1800; then
+PERFIL="${FACEBOOK_PROFILE_DIR:-${DATA_DIR}/perfil-chrome}"
+echo "[estacao] perfil do navegador: ${PERFIL}"
+if python tools/facebook_login.py "${DATA_DIR}/fb_state.json"      --perfil "${PERFIL}" --espera 1800; then
   echo "[estacao] SESSAO GRAVADA em ${DATA_DIR}/fb_state.json."
   echo "[estacao] Pode fechar esta aba. A estacao fica parada de proposito:"
   echo "[estacao] navegador logado exposto na internet nao se deixa aceso."

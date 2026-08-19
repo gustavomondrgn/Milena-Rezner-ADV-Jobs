@@ -70,6 +70,10 @@ services:
       # container na mão depois do primeiro deploy. Gerar com
       # `python bot/tools/sessao_para_env.py`.
       - FACEBOOK_STATE_B64=${FACEBOOK_STATE_B64:-}
+      # Perfil do navegador, no volume. Com ele, o login feito na estacao e o
+      # bot sao o mesmo aparelho aos olhos do Facebook — que e o que evita a
+      # tela "Continuar como Fulano" a cada ciclo.
+      - FACEBOOK_PROFILE_DIR=${FACEBOOK_PROFILE_DIR:-/app/data/perfil-chrome}
       # Credencial para o bot REFAZER o login sozinho, aqui dentro, quando a
       # sessão cair. É o que separa "caiu de madrugada e voltou" de "caiu e
       # alguém precisa perceber". Sem estas, a sessão só volta na mão.
