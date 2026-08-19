@@ -91,6 +91,15 @@ interesse? Divido honorarios."""
 check("HÍBRIDO: advogado que está pedindo", filters.parece_divulgacao(HIBRIDO), False)
 check("texto vazio", filters.parece_divulgacao(""), False)
 
+# Anúncio real colhido em 16/08/2026 no grupo "Advogados - Tire suas dúvidas".
+# Passou batido porque o padrão exigia "atendemos EM todo o Brasil", e ele está
+# escrito sem o "em" — o tipo de detalhe que só um post de verdade mostra.
+ANUNCIO_REAL = """ESTA GRAVIDA E DESEMPREGADA? Voce sabia que pode ter direito ao
+salario-maternidade? Nos analisamos o seu caso e orientamos sobre as
+contribuicoes necessarias. Atendemos todo o Brasil. Chame no WhatsApp."""
+check("anúncio com 'Atendemos todo o Brasil' (sem o 'em')",
+      filters.parece_divulgacao(ANUNCIO_REAL), True)
+
 # ---------------------------------------------------------------------------
 secao("FACEBOOK — limpeza do texto do card")
 # ---------------------------------------------------------------------------
@@ -122,6 +131,48 @@ Comentar"""
 limpo2 = facebook.limpar_texto(CARD_SEM_AUTOR, "Advogados de Campinas e Região")
 check("tira cabeçalho com data e '···'",
       limpo2, "Alguem atua com acao renovatoria de locacao comercial?")
+
+# Os três casos abaixo saíram de posts REAIS, colhidos em 16/08/2026 no grupo
+# "Preciso de um Advogado". Cada um passava despercebido: nenhum quebra nada,
+# todos entregam texto errado ao classificador.
+
+# 1) Depois que o bot clica em "Ver mais", o botão vira "Ver menos" — e o
+#    Facebook o deixa DENTRO do bloco de texto do post.
+check("tira 'Ver menos' colado no fim",
+      facebook.limpar_sobra_de_botao("Entre em contato para mais informações. Ver menos"),
+      "Entre em contato para mais informações.")
+check("tira '… Ver mais' de post truncado",
+      facebook.limpar_sobra_de_botao("Meu inquilino não paga há 5 meses e… Ver mais"),
+      "Meu inquilino não paga há 5 meses e")
+check("não come texto que só TERMINA parecido",
+      facebook.limpar_sobra_de_botao("O contrato dizia que eu poderia ver mais tarde"),
+      "O contrato dizia que eu poderia ver mais tarde")
+
+# 2) Card com imagem vem salpicado de "Facebook", que é o nome acessível dos
+#    links de mídia. Num post só de foto isso passava dos 40 caracteres mínimos
+#    e um post sem texto nenhum chegava ao classificador parecendo ter conteúdo.
+CARD_SO_FOTO = """Facebook
+Facebook
+Facebook
+Mari Beatriz
+·
+Facebook
+Comente como Gustavo
+Facebook"""
+check("post só de foto não vira texto de mentira",
+      len(facebook.limpar_texto(CARD_SO_FOTO, "Mari Beatriz")) < 40, True)
+
+CARD_COM_FOTO_E_TEXTO = """Facebook
+Facebook
+Carlos Goes
+2 h
+Facebook
+Meu vizinho construiu em cima da minha divisa e nao quer desfazer.
+Facebook
+Comente como Gustavo"""
+check("mantém o texto do post que tem foto E texto",
+      facebook.limpar_texto(CARD_COM_FOTO_E_TEXTO, "Carlos Goes"),
+      "Meu vizinho construiu em cima da minha divisa e nao quer desfazer.")
 
 # ---------------------------------------------------------------------------
 secao("FACEBOOK — data relativa vira ISO ordenável")
@@ -212,6 +263,52 @@ check("a palavra 'indisponível' sozinha não basta",
 check("'não encontrado' fora de contexto",
       sumiu("O processo não encontrado no PJe, alguém sabe o que houve?"), False)
 check("texto vazio", sumiu(""), False)
+
+# -- Cadência da confirmação ------------------------------------------------
+# A detecção estava certa e mesmo assim a mensagem ficava ~24h no ar: quem
+# segurava era a SEGUNDA checagem, que usava o intervalo normal. O post suspeito
+# tem que voltar para a fila em uma hora; o saudável, não.
+
+import publicadas  # noqa: E402
+
+
+def _registro_com(faltas, checada_ha_horas, agora):
+    reg = publicadas.RegistroPublicadas(Path(_TMP) / f"pub-{faltas}-{checada_ha_horas}.json")
+    reg.registrar(uid="facebook:1", source="facebook", source_id="1",
+                  title="t", message_id=9, agora=agora, url="u")
+    reg._itens["facebook:1"]["faltas"] = faltas
+    reg._itens["facebook:1"]["checada_em"] = (
+        agora - timedelta(hours=checada_ha_horas)).isoformat()
+    return reg
+
+
+AGORA_P = datetime(2026, 8, 16, 20, 0, 0, tzinfo=BRT)
+
+check("suspeito volta à fila depois de 1h",
+      len(_registro_com(1, 2, AGORA_P).a_checar(
+          agora=AGORA_P, intervalo_horas=24, limite=8)), 1)
+check("suspeito NÃO volta antes de 1h",
+      len(_registro_com(1, 0.5, AGORA_P).a_checar(
+          agora=AGORA_P, intervalo_horas=24, limite=8)), 0)
+check("saudável continua esperando as 24h",
+      len(_registro_com(0, 2, AGORA_P).a_checar(
+          agora=AGORA_P, intervalo_horas=24, limite=8)), 0)
+check("saudável volta depois das 24h",
+      len(_registro_com(0, 25, AGORA_P).a_checar(
+          agora=AGORA_P, intervalo_horas=24, limite=8)), 1)
+
+# O teto por ciclo é baixo; se o suspeito ficar atrás de posts saudáveis na
+# ordenação, ele não é checado e a mensagem errada continua no grupo.
+_reg = publicadas.RegistroPublicadas(Path(_TMP) / "pub-ordem.json")
+for i in range(5):
+    _reg.registrar(uid=f"facebook:{i}", source="facebook", source_id=str(i),
+                   title="t", message_id=i, agora=AGORA_P, url="u")
+    _reg._itens[f"facebook:{i}"]["checada_em"] = (
+        AGORA_P - timedelta(hours=48)).isoformat()
+_reg._itens["facebook:4"]["faltas"] = 1
+check("suspeito passa na frente quando o teto é 1",
+      _reg.a_checar(agora=AGORA_P, intervalo_horas=24, limite=1)[0]["uid"],
+      "facebook:4")
 
 # ---------------------------------------------------------------------------
 secao("REGRA DE LOCAL — só morde quando exige presença")

@@ -117,18 +117,27 @@ def main() -> int:
             navegador.close()
             return 1
 
-        # Roda a extração crua de novo, só para comparar antes/depois da limpeza.
-        brutos = pagina.evaluate(facebook._EXTRAIR_JS) or []
+        # O lote cru guardado pela própria coleta. Reextrair aqui não funcionaria:
+        # o feed é virtualizado e, no fim da rolagem, os primeiros posts já foram
+        # desmontados — a segunda leitura mediria o que sobrou, não o que o bot viu.
+        brutos = list(fonte.ultimos_brutos)
         navegador.close()
 
+    def _texto_final(b: dict) -> str:
+        # Mesma regra do `_ler_grupo`: o marcador do Facebook ganha da limpeza.
+        return facebook.limpar_sobra_de_botao(b.get("mensagem") or "") \
+            or facebook.limpar_texto(b.get("texto") or "", b.get("autor") or "")
+
     barra("RESUMO")
-    print(f"cards com permalink encontrados : {len(brutos)}")
+    print(f"cards no feed (com id de post)  : {len(brutos)}")
     print(f"posts aproveitáveis             : {len(jobs)}")
-    curtos = sum(
-        1 for b in brutos
-        if len(facebook.limpar_texto(b.get('texto') or '', b.get('autor') or '')) < 40
-    )
+    curtos = sum(1 for b in brutos if len(_texto_final(b)) < 40)
     print(f"descartados por texto < 40 chars: {curtos}")
+    # De onde saiu o texto: `story_message` é o Facebook entregando o post já
+    # isolado; a limpeza é reserva e é onde mora o risco de sobra ou de corte.
+    via_marcador = sum(1 for b in brutos if (b.get("mensagem") or "").strip())
+    print(f"texto via story_message         : {via_marcador}")
+    print(f"texto via limpeza (reserva)     : {len(brutos) - via_marcador}")
     print()
 
     if not jobs:

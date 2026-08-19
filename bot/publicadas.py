@@ -31,6 +31,19 @@ log = logging.getLogger("adv-jobs-bot.publicadas")
 # Quantos 404 seguidos são necessários para dar a vaga como encerrada.
 CONFIRMACOES = 2
 
+# Intervalo até a PRÓXIMA checagem de um post que já deu sinal de ter sumido.
+#
+# Existe porque as duas confirmações não precisam custar o mesmo tempo. A
+# primeira checagem é barata de esperar: acontece no ciclo seguinte à publicação
+# e não tem pressa. A segunda é que decide — e com o intervalo normal (24h) a
+# mensagem de um post apagado ficava um dia inteiro no grupo do cliente
+# parecendo viva. Foi o que o Gustavo viu em 16/08/2026.
+#
+# Acelerar tudo resolveria também, e custaria 24× mais páginas carregadas por
+# dia. Acelerar só quem já é suspeito custa quase nada: são poucos, e a maioria
+# volta a responder na segunda olhada (foi instabilidade) e sai da fila rápida.
+HORAS_ATE_CONFIRMAR = 1
+
 
 class RegistroPublicadas:
     def __init__(self, path: Path, dias_de_vida: int = 30) -> None:
@@ -126,25 +139,39 @@ class RegistroPublicadas:
     # -- leitura ------------------------------------------------------------
 
     def a_checar(self, *, agora: datetime, intervalo_horas: int,
-                 limite: int) -> list[dict[str, Any]]:
-        """As próximas vagas a reexaminar, mais antigas primeiro."""
+                 limite: int,
+                 horas_ate_confirmar: int = HORAS_ATE_CONFIRMAR) -> list[dict[str, Any]]:
+        """As próximas vagas a reexaminar, o suspeito primeiro.
+
+        Duas velocidades: quem nunca deu sinal de ter sumido espera
+        `intervalo_horas` (24h por padrão) entre olhadas; quem já deu espera
+        `horas_ate_confirmar`. É a segunda checagem que autoriza mexer na
+        mensagem do cliente, e fazê-la esperar um dia inteiro deixava a demanda
+        apagada no ar por todo esse tempo.
+        """
         with self._lock:
             self._podar_locked(agora)
-            corte = agora - timedelta(hours=intervalo_horas)
+            corte_normal = agora - timedelta(hours=intervalo_horas)
+            corte_suspeito = agora - timedelta(hours=horas_ate_confirmar)
             pendentes = []
             for uid, item in self._itens.items():
                 if item.get("encerrada"):
                     continue
+                suspeito = int(item.get("faltas") or 0) > 0
                 quando = item.get("checada_em")
                 if quando:
                     try:
-                        if datetime.fromisoformat(quando) > corte:
+                        limite_ok = corte_suspeito if suspeito else corte_normal
+                        if datetime.fromisoformat(quando) > limite_ok:
                             continue
                     except ValueError:
                         pass
                 pendentes.append({"uid": uid, **item})
-            # Quem está há mais tempo sem checagem vai primeiro.
-            pendentes.sort(key=lambda i: i.get("checada_em") or "")
+            # Suspeito na frente: ele é o único que pode virar uma ação visível
+            # neste ciclo, e o teto por ciclo é baixo. Depois, quem está há mais
+            # tempo sem checagem.
+            pendentes.sort(key=lambda i: (-int(i.get("faltas") or 0),
+                                          i.get("checada_em") or ""))
             return pendentes[:limite]
 
     def _podar_locked(self, agora: datetime) -> None:

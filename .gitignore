@@ -20,6 +20,9 @@ bot/data/
 fb_state.json
 *fb_state*.json
 
+# Cópia que o listar_grupos.py deixa antes de reescrever a lista de grupos.
+*.bak
+
 # Python
 __pycache__/
 *.pyc

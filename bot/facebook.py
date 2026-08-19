@@ -135,9 +135,22 @@ def carregar_grupos(caminho: Path) -> list[Grupo]:
 _FIM_DO_POST = re.compile(
     r"^(?:todas as rea[cç][oõ]es|curtir|gostei|like|comentar|coment[aá]rios?|"
     r"compartilhar|share|ver tradu[cç][aã]o|ver mais coment[aá]rios|"
+    r"comente como|write a comment|"
     r"\d+\s*coment[aá]rios?|\d+\s*compartilhamentos?)\b",
     re.I,
 )
+
+# O `innerText` de um card com imagem vem salpicado de linhas "Facebook" — é o
+# nome acessível que o próprio site dá aos links de mídia. Num post só de foto
+# isso sozinho passava dos 40 caracteres mínimos e fazia um post sem texto nenhum
+# chegar ao classificador parecendo ter conteúdo.
+_LINHA_VAZIA_DE_SENTIDO = re.compile(r"^(?:facebook|\W*)$", re.I)
+
+# Sobra do botão de expandir. Depois que o bot clica em "Ver mais", o botão vira
+# "Ver menos" — e o Facebook o mantém DENTRO do bloco de texto do post, então ele
+# entra no `story_message` como se fosse a última palavra de quem escreveu.
+_BOTAO_EXPANDIR = re.compile(r"\s*(?:\.{3}|…)?\s*(?:ver menos|ver mais|see less|see more)\s*$",
+                             re.I)
 
 # Linhas de enfeite do cabeçalho, que aparecem entre o autor e o texto.
 _RUIDO_CABECALHO = re.compile(
@@ -171,11 +184,14 @@ def limpar_texto(bruto: str, autor: str = "") -> str:
     """
     linhas = [ln.strip() for ln in (bruto or "").replace("\r", "").split("\n")]
 
-    # 1) Corta do rodapé em diante (reações, ações, comentários).
+    # 1) Corta do rodapé em diante (reações, ações, comentários) e joga fora as
+    #    linhas que não são texto de ninguém.
     corpo: list[str] = []
     for ln in linhas:
         if _FIM_DO_POST.match(_sem_acento(ln)):
             break
+        if _LINHA_VAZIA_DE_SENTIDO.match(ln):
+            continue
         corpo.append(ln)
 
     # 2) Tira o cabeçalho: nome do autor, horário e enfeites. Só no começo — as
@@ -200,7 +216,27 @@ def limpar_texto(bruto: str, autor: str = "") -> str:
         break
 
     texto = "\n".join(corpo).strip()
-    return re.sub(r"\n{3,}", "\n\n", texto)
+    texto = re.sub(r"\n{3,}", "\n\n", texto)
+    return limpar_sobra_de_botao(texto)
+
+
+def limpar_sobra_de_botao(texto: str) -> str:
+    """Tira o "Ver menos"/"Ver mais" grudado no fim do texto do post.
+
+    Vale tanto para o texto limpo à mão quanto para o `story_message`, que vem
+    pronto do Facebook e mesmo assim carrega essa sobra. Sem isto, todo post
+    longo termina com uma palavra que a pessoa não escreveu — e o classificador
+    lê "Ver menos" como se fosse parte do pedido.
+    """
+    limpo = (texto or "").strip()
+    # Duas passagens: "… Ver mais" seguido de "Ver menos" acontece quando o
+    # clique expandiu o post no meio da coleta.
+    for _ in range(2):
+        novo = _BOTAO_EXPANDIR.sub("", limpo).strip()
+        if novo == limpo:
+            break
+        limpo = novo
+    return limpo
 
 
 def parse_tempo(rotulo: str, agora: datetime) -> str:
@@ -255,58 +291,169 @@ def titulo_do_post(texto: str, limite: int = 90) -> str:
 # Roda dentro da página. Devolve uma lista crua de posts; toda a limpeza fica no
 # Python, que é onde dá para testar sem navegador.
 #
-# Por que `div[role="article"]`: as classes do Facebook são geradas e mudam sem
-# aviso, mas os papéis ARIA são o que faz o site funcionar com leitor de tela —
-# eles são estáveis porque quebrá-los quebraria a acessibilidade do produto.
+# COMO O FEED DE GRUPO É HOJE (medido em 16/08/2026, contra o facebook.com)
+# -------------------------------------------------------------------------
+# A primeira versão deste arquivo procurava `div[role="article"]`, apostando que
+# papel ARIA é estável porque quebrá-lo quebraria o leitor de tela. A aposta
+# estava errada para esta tela: na página de grupo existem hoje **dois**
+# `role="article"` na página inteira, ambos vazios, e nenhum é post. O post é
+# filho direto de `div[role="feed"]`.
+#
+# O que substituiu o papel ARIA como âncora estável foi o `data-ad-rendering-role`,
+# que o Facebook usa para marcar as partes do post no próprio produto de anúncio:
+#
+#     story_message  → o texto que a pessoa escreveu, sozinho
+#     profile_name   → o autor
+#
+# Isso é melhor do que existia antes: `story_message` já vem sem cabeçalho, sem
+# rodapé de reações e sem comentário de terceiro. A limpeza em `limpar_texto`
+# continua no código como reserva — para o layout antigo e para o card em que
+# esse marcador não aparecer —, mas deixou de ser o caminho principal.
+#
+# O id do post aparece em quatro formatos, e é preciso aceitar os quatro: post
+# comum traz `/posts/<id>`, post antigo traz `story_fbid`, post com foto esconde
+# o id em `set=gm.<id>` no link da imagem, e o link do horário virou
+# `/stories/<feed>/<base64>/`, com o id dentro do base64 (`S:_ISC:<id>`).
 _EXTRAIR_JS = r"""
 () => {
-  const saida = [];
-  const artigos = document.querySelectorAll('div[role="article"]');
+  // O slug da URL atual monta o permalink canônico. Vale mais que o href do
+  // card: o link do Facebook vem carregado de `__cft__`, um token de rastreio
+  // que muda a cada carregamento e deixaria o mesmo post com URL diferente a
+  // cada ciclo.
+  const slug = (location.pathname.match(/\/groups\/([^/?#]+)/) || [])[1] || '';
 
-  for (const art of artigos) {
-    // Comentário também é role=article, aninhado dentro do post. Só o de fora
-    // é o post; os de dentro são conversa alheia.
+  const canonica = (id) => slug
+    ? 'https://www.facebook.com/groups/' + slug + '/posts/' + id + '/'
+    : 'https://www.facebook.com/' + id;
+
+  const idDoHref = (h) => {
+    if (!h) return null;
+    let m = h.match(/\/groups\/[^/?#]+\/(?:posts|permalink)\/(\d+)/);
+    if (m) return {id: m[1], url: canonica(m[1])};
+    m = h.match(/[?&]story_fbid=(\d+)/);
+    if (m) return {id: m[1], url: canonica(m[1])};
+    // Post com foto: o link da imagem carrega o id do post do grupo em `gm.`.
+    m = h.match(/[?&]set=gm\.(\d+)/);
+    if (m) return {id: m[1], url: canonica(m[1])};
+    // Link do horário no layout novo. O base64 guarda "S:_ISC:<id do post>".
+    m = h.match(/\/stories\/\d+\/([A-Za-z0-9+/=_-]+)/);
+    if (m) {
+      try {
+        const dec = atob(m[1].replace(/-/g, '+').replace(/_/g, '/'));
+        const n = dec.match(/(\d{6,})\s*$/);
+        if (n) return {id: n[1], url: canonica(n[1])};
+      } catch (e) { /* base64 de outra coisa */ }
+    }
+    // `pfbid...` é o id opaco que o Facebook passou a usar em parte dos posts.
+    // Não é número e não monta URL canônica: aqui o permalink.php é o link, e o
+    // id de origem é o próprio pfbid — estável entre ciclos, que é o que a
+    // deduplicação precisa.
+    m = h.match(/[?&]story_fbid=(pfbid[A-Za-z0-9]+)/);
+    if (m) {
+      const dono = (h.match(/[?&]id=(\d+)/) || [])[1] || '';
+      return {
+        id: m[1],
+        url: 'https://www.facebook.com/permalink.php?story_fbid=' + m[1] +
+             (dono ? '&id=' + dono : ''),
+      };
+    }
+    return null;
+  };
+
+  const ehTempo = (t) => /^(?:agora|h[áa]\s|\d+\s*(?:min|m|h|d|sem)\b|ontem|hoje|\d{1,2}\s+de\s+\w+)/i
+      .test((t || '').trim());
+
+  const cards = [];
+  const feed = document.querySelector('div[role="feed"]');
+  if (feed) for (const c of feed.children) cards.push(c);
+  // Layout antigo, e outras telas que ainda usam article (a página de um post
+  // isolado, por exemplo). Comentário também é role=article, aninhado dentro do
+  // post: só o de fora é o post.
+  for (const art of document.querySelectorAll('div[role="article"]')) {
     if (art.parentElement && art.parentElement.closest('div[role="article"]')) continue;
+    if (cards.some(c => c === art || c.contains(art))) continue;
+    cards.push(art);
+  }
 
+  const saida = [];
+  for (const card of cards) {
     let pid = '', url = '', tempo = '';
-    for (const a of art.querySelectorAll('a[href]')) {
-      const h = a.getAttribute('href') || '';
-      let m = h.match(/\/groups\/([^/?#]+)\/(?:posts|permalink)\/(\d+)/);
-      if (m) {
-        pid = m[2];
-        url = 'https://www.facebook.com/groups/' + m[1] + '/posts/' + m[2] + '/';
-        tempo = (a.innerText || '').trim();
-        break;
-      }
-      m = h.match(/[?&]story_fbid=(\d+)/);
-      if (m) {
-        pid = m[1];
-        url = h.startsWith('http') ? h : 'https://www.facebook.com' + h;
-        tempo = (a.innerText || '').trim();
-        break;
+    for (const a of card.querySelectorAll('a[href]')) {
+      const t = (a.innerText || '').trim();
+      if (!tempo && ehTempo(t)) tempo = t.split('\n')[0];
+      if (!pid) {
+        const achado = idDoHref(a.getAttribute('href'));
+        if (achado) { pid = achado.id; url = achado.url; }
       }
     }
     if (!pid) continue;
 
+    const msgEl = card.querySelector('[data-ad-rendering-role="story_message"]');
+    const nomeEl = card.querySelector('[data-ad-rendering-role="profile_name"]');
+
+    // O nome vem no link; o resto da linha costuma ser enfeite do Facebook
+    // ("está em Kohat", "compartilhou uma lembrança").
     let autor = '';
-    const cab = art.querySelector('h2 a, h3 a, h4 a, h2 span, h3 span, h4 span');
-    if (cab) autor = (cab.innerText || '').trim().split('\n')[0];
+    const nomeLink = nomeEl ? nomeEl.querySelector('a') : null;
+    if (nomeLink) autor = (nomeLink.innerText || '').trim().split('\n')[0];
+    if (!autor && nomeEl) autor = (nomeEl.innerText || '').trim().split('\n')[0];
+    if (!autor) {
+      const cab = card.querySelector('h2 a, h3 a, h4 a, h2 span, h3 span, h4 span');
+      if (cab) autor = (cab.innerText || '').trim().split('\n')[0];
+    }
 
     // Perfil do autor: em post de pedido de serviço é por onde se responde.
     let perfil = '';
-    const pa = art.querySelector('h2 a[href], h3 a[href], h4 a[href]');
+    const pa = (nomeEl && nomeEl.querySelector('a[href]'))
+            || card.querySelector('h2 a[href], h3 a[href], h4 a[href]');
     if (pa) {
       const h = pa.getAttribute('href') || '';
-      perfil = h.startsWith('http') ? h : 'https://www.facebook.com' + h;
-      perfil = perfil.split('?')[0];
+      perfil = (h.startsWith('http') ? h : 'https://www.facebook.com' + h).split('?')[0];
     }
 
     saida.push({
       pid, url, tempo, autor, perfil,
-      texto: (art.innerText || '').trim(),
+      // `mensagem` é o texto do post já isolado pelo próprio Facebook — quando
+      // existe, não há o que limpar. `texto` é o card inteiro, reserva para o
+      // card em que o marcador não aparecer.
+      mensagem: msgEl ? (msgEl.innerText || '').trim() : '',
+      texto: (card.innerText || '').trim(),
     });
   }
   return saida;
+}
+"""
+
+# Marca os links do cabeçalho do post cujo href ainda não é permalink. O
+# Facebook entrega esse `<a>` com href de mentira — vazio, `#`, ou só o token de
+# rastreio `?__cft__=...` — e só troca pelo link de verdade quando o ponteiro
+# passa por cima. Sem passar o mouse, o card fica sem id e o bot o descarta
+# inteiro, que foi metade do "zero posts" da primeira medição.
+#
+# A primeira tentativa mirava o link pelo TEXTO do horário, e não achava nada: o
+# Facebook escreve o horário embaralhado, com caractere invisível entre as
+# letras (`o͏d͏n͏p͏o͏t͏e͏r͏s͏S͏`), e remonta na ordem certa por CSS. Não há texto de
+# horário para casar. O href cru, esse sim, se reconhece.
+_MARCAR_LINKS_CRUS_JS = r"""
+() => {
+  const feed = document.querySelector('div[role="feed"]');
+  if (!feed) return 0;
+  const cru = (h) => h === null || h === '' || h === '#' || h.startsWith('?');
+  let n = 0;
+  for (const card of feed.children) {
+    // Card sem mensagem é placeholder de post já descarregado da tela.
+    if (!card.querySelector('[data-ad-rendering-role="story_message"]')) continue;
+    let noCard = 0;
+    for (const a of card.querySelectorAll('a[role="link"]')) {
+      if (!cru(a.getAttribute('href'))) continue;
+      a.setAttribute('data-fbhover', String(n++));
+      // Quatro por card chega: o permalink está no cabeçalho, e o resto são
+      // "Ver tradução" e afins. Sem esse teto, um card com galeria de fotos
+      // sozinho consumiria a passagem inteira.
+      if (++noCard >= 4) break;
+    }
+  }
+  return n;
 }
 """
 
@@ -362,6 +509,10 @@ class FacebookSource(BaseSource):
         self.headless = headless
         self._grupos_mtime: float | None = None
         self._grupos: list[Grupo] = []
+        # Último lote cru do navegador, do jeito que saiu do `_EXTRAIR_JS`. Só a
+        # sonda usa: é o que permite olhar o antes/depois da limpeza sem abrir um
+        # segundo caminho de código, que mediria a sonda em vez do bot.
+        self.ultimos_brutos: list[dict] = []
 
     # -- configuração -------------------------------------------------------
 
@@ -462,27 +613,48 @@ class FacebookSource(BaseSource):
                 "de novo."
             )
 
-        # O feed monta em etapas; esperar o primeiro artigo é mais confiável que
-        # esperar `networkidle`, que num feed infinito nunca acontece.
+        # O feed monta em etapas; esperar o container do feed é mais confiável
+        # que esperar `networkidle`, que num feed infinito nunca acontece.
         try:
-            pagina.wait_for_selector('div[role="article"]', timeout=30_000)
+            pagina.wait_for_selector('div[role="feed"], div[role="article"]',
+                                     timeout=30_000)
         except Exception as exc:  # noqa: BLE001
             log.warning("Grupo %s não renderizou nenhum post: %s", grupo.rotulo, exc)
             return []
 
-        for _ in range(self.scrolls):
-            pagina.mouse.wheel(0, 2200)
-            pagina.wait_for_timeout(random.randint(900, 1800))
+        # COLHER A CADA ROLAGEM, NÃO NO FIM.
+        #
+        # O feed do Facebook é virtualizado: post que sai da tela é desmontado, e
+        # o que sobra no DOM é uma div vazia, sem texto e sem link. Rolar quatro
+        # vezes e só então extrair — que era o que este método fazia — lia o fim
+        # do feed e jogava fora tudo que passou pela tela no caminho. O sintoma
+        # era o pior possível: zero post, sem erro nenhum, idêntico a "a conta
+        # não é membro deste grupo".
+        brutos: dict[str, dict] = {}
+        for passo in range(self.scrolls + 1):
+            self._expandir(pagina)
+            self._hidratar_permalinks(pagina)
+            for b in pagina.evaluate(_EXTRAIR_JS) or []:
+                pid = str(b.get("pid") or "")
+                if not pid:
+                    continue
+                # Fica com a melhor versão do mesmo post: a passagem em que o
+                # "Ver mais" já tinha sido clicado traz o texto inteiro.
+                antigo = brutos.get(pid)
+                if antigo is None or len(b.get("mensagem") or "") > len(antigo.get("mensagem") or ""):
+                    brutos[pid] = b
+            if passo < self.scrolls:
+                pagina.mouse.wheel(0, 2200)
+                pagina.wait_for_timeout(random.randint(900, 1800))
 
-        self._expandir(pagina)
-
-        brutos = pagina.evaluate(_EXTRAIR_JS) or []
-        log.info("Facebook: %s devolveu %d card(s)", grupo.rotulo, len(brutos))
+        brutos_lista = list(brutos.values())
+        self.ultimos_brutos = brutos_lista  # a sonda lê isto para o diagnóstico
+        log.info("Facebook: %s devolveu %d card(s)", grupo.rotulo, len(brutos_lista))
 
         agora = datetime.now().astimezone()
         jobs: list[Job] = []
         vistos: set[str] = set()
-        for bruto in brutos:
+        for bruto in brutos_lista:
             if len(jobs) >= self.max_posts_por_grupo:
                 break
             pid = str(bruto.get("pid") or "")
@@ -491,7 +663,10 @@ class FacebookSource(BaseSource):
             vistos.add(pid)
 
             autor = (bruto.get("autor") or "").strip()
-            texto = limpar_texto(bruto.get("texto") or "", autor)
+            # `mensagem` é o texto que o próprio Facebook marcou como sendo o
+            # post. Quando ele existe, limpar seria só arriscar cortar conteúdo.
+            mensagem = limpar_sobra_de_botao(bruto.get("mensagem") or "")
+            texto = mensagem or limpar_texto(bruto.get("texto") or "", autor)
             # Post curto demais não é pedido de trabalho — é "up", "interesse",
             # "chamei no pv". Gastar chamada de IA nisso é queimar cota à toa.
             if len(texto) < 40:
@@ -612,23 +787,70 @@ class FacebookSource(BaseSource):
 
         # O post continua lá se o card ainda renderiza. Se nem card nem frase de
         # erro apareceram, é caso indeterminado — e indeterminado é "aberta".
+        #
+        # Os três seletores existem porque a página de um post isolado e o feed
+        # do grupo não usam a mesma marcação: confiar só em `role="article"` foi
+        # o que fez o extrator devolver zero.
         try:
-            if pagina.locator('div[role="article"]').count() > 0:
+            presente = ('[data-ad-rendering-role="story_message"], '
+                        'div[role="article"], div[role="feed"]')
+            if pagina.locator(presente).count() > 0:
                 return "aberta"
         except Exception:  # noqa: BLE001
             pass
         return "desconhecida"
 
     @staticmethod
+    def _hidratar_permalinks(pagina: Any) -> int:
+        """Passa o mouse pelos links do post para o href virar permalink.
+
+        O Facebook entrega esse `<a>` com href de mentira e só o troca pelo link
+        real no `mouseover`. Como o bot descarta card sem id, um post inteiro se
+        perde por causa de um evento de mouse que nunca aconteceu — falha que
+        não dá erro nenhum, só devolve menos post do que o grupo publicou.
+
+        Devolve quantos links foram tocados. Erro aqui nunca interrompe a
+        coleta: no pior caso sobram os posts cujo id veio pelo link da foto, e o
+        que ficou de fora reaparece na próxima rolagem, quando o card estiver
+        no meio da tela.
+        """
+        try:
+            total = int(pagina.evaluate(_MARCAR_LINKS_CRUS_JS) or 0)
+        except Exception as exc:  # noqa: BLE001
+            log.debug("Não consegui marcar os links do post: %s", exc)
+            return 0
+        if not total:
+            return 0
+
+        tocados = 0
+        for i in range(min(total, 40)):
+            try:
+                pagina.locator(f'[data-fbhover="{i}"]').first.hover(timeout=1000)
+                pagina.wait_for_timeout(120)
+                tocados += 1
+            except Exception:  # noqa: BLE001  — card saiu da tela, menu abriu na frente
+                continue
+        log.debug("Links tocados para hidratar permalink: %d de %d", tocados, total)
+        return tocados
+
+    @staticmethod
     def _expandir(pagina: Any) -> None:
-        """Clica nos "Ver mais" para o post vir inteiro.
+        """Clica nos "Ver mais" **dos posts** para o texto vir inteiro.
 
         Sem isto o Facebook entrega os primeiros ~250 caracteres, e é justamente
         no fim do post que costumam estar a comarca, o valor e o contato — os
         três dados que decidem se o trabalho serve.
+
+        O `div[role="feed"]` na frente não é decoração. A barra lateral do
+        Facebook tem um "Ver mais" próprio (o que abre a lista de atalhos), e a
+        versão anterior clicava nele: a página remontava, o feed se redesenhava e
+        os posts já carregados sumiam. Medido — cards caíam de 14 para 13 e os
+        marcadores de post de 35 para 25 a cada passagem.
         """
         try:
-            botoes = pagina.get_by_role(
+            feed = pagina.locator('div[role="feed"]')
+            escopo = feed if feed.count() else pagina.locator("body")
+            botoes = escopo.get_by_role(
                 "button", name=re.compile(r"^(ver mais|see more)$", re.I)
             )
             total = min(botoes.count(), 30)
@@ -636,7 +858,12 @@ class FacebookSource(BaseSource):
             return
         for i in range(total):
             try:
-                botoes.nth(i).click(timeout=1500)
+                alvo = botoes.nth(i)
+                # Botão fora da tela é post que o feed já desmontou: clicar nele
+                # rola a página de volta e bagunça a ordem da colheita.
+                if not alvo.is_visible():
+                    continue
+                alvo.click(timeout=1500)
                 pagina.wait_for_timeout(120)
             except Exception:  # noqa: BLE001
                 continue

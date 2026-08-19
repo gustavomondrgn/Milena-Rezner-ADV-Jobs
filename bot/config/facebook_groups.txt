@@ -48,3 +48,17 @@
 # https://www.facebook.com/groups/987654321   | Advogados SP Capital      | SP
 # correspondentesjuridicosbrasil              | Correspondentes Brasil    |
 # https://www.facebook.com/groups/111222333   | Síndicos e Condomínios PR | PR
+
+https://www.facebook.com/groups/1021662230014377                | ADVOGADO GRATUITO ONLINE |
+https://www.facebook.com/groups/740457406597872                 | Advogados (dúvidas jurídicas) em Curitiba e região |
+https://www.facebook.com/groups/423810409605538                 | Advogados - Tire suas dúvidas |
+https://www.facebook.com/groups/1598186110295131                | Advogados do Estado do Rio de Janeiro/RJ |
+https://www.facebook.com/groups/820555598066702                 | Advogados Iniciantes |
+https://www.facebook.com/groups/646977390648901                 | Advogados online - 24 horas (Tire suas dúvidas gratuitamente) |
+https://www.facebook.com/groups/1199633294567674                | Advogados online - 24hs / Tire suas dúvidas gratuitamente |
+https://www.facebook.com/groups/965135845339117                 | dúvidas gratuitas - Advogados online |
+https://www.facebook.com/groups/precisodeumadvogado             | Preciso de um Advogado |
+
+# --- AGUARDANDO APROVAÇÃO DO ADMIN -----------------------------------------
+# Descomente quando o pedido for aprovado (ou rode o listar_grupos.py de novo).
+# https://www.facebook.com/groups/1261340937673026                | Advogados Direito Imobiliário - Tire as suas dúvidas |

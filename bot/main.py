@@ -191,16 +191,20 @@ QUEUE_TTL_DAYS = int(os.getenv("QUEUE_TTL_DAYS", "3"))
 MIN_SCORE = int(os.getenv("MIN_SCORE", "0"))
 
 # --- Demanda encerrada -----------------------------------------------------
-# O que fazer quando o post some do Facebook: "apagar" remove a mensagem do
-# grupo (padrão), "marcar" a mantém riscada com um aviso, "nada" desliga a
+# O que fazer quando o post some do Facebook: "marcar" mantém a mensagem no
+# grupo, riscada e com aviso (padrão), "apagar" a remove, "nada" desliga a
 # revisão inteira.
+#
+# O padrão era "apagar" e virou "marcar" em 16/08/2026, por decisão do Gustavo:
+# quem já tinha visto a demanda no grupo entende o que aconteceu com ela; quando
+# a mensagem some, o histórico fica com um buraco sem explicação.
 #
 # Vale a ressalva de expectativa: no Facebook isso rende menos do que rendia num
 # portal de vagas. Portal tira o anúncio do ar quando a vaga é preenchida; já
 # quem posta num grupo raramente volta para apagar depois de resolver. O que
 # esta verificação pega de verdade é post removido pelo moderador, post apagado
 # pelo autor e grupo que fechou — não "a demanda já foi atendida".
-ACAO_VAGA_ENCERRADA = os.getenv("ACAO_VAGA_ENCERRADA", "apagar").strip().lower()
+ACAO_VAGA_ENCERRADA = os.getenv("ACAO_VAGA_ENCERRADA", "marcar").strip().lower()
 RECHECK_HORAS = int(os.getenv("RECHECK_HORAS", "24"))
 # Baixo de propósito: no Facebook cada verificação é uma página carregada num
 # navegador, não uma requisição de API. Oito por ciclo de 10 min dá ~48/hora,
@@ -224,16 +228,18 @@ def _ufs(bruto: str) -> tuple[str, ...]:
     )
 
 
-# UFs que ela atende, conforme milenarezner.com.br. Vazio = aceita qualquer UF.
+# UFs que ela atende. **Vazio = aceita qualquer UF, e vazio é o padrão.**
 #
-# O site ainda diz "demais estados sob demanda, com rede de correspondentes" —
-# ou seja, esta lista é o alcance PRÓPRIO, não o limite do que ela consegue
-# atender. Se a rede de correspondentes for para valer, o certo é esvaziar a
-# lista (um campo no painel) e deixar passar demanda presencial de qualquer
-# lugar: quem decide se compensa acionar um correspondente é ela, não o bot.
-UFS_ATENDIDAS = _ufs(
-    os.getenv("UFS_ATENDIDAS", "SP,RJ,SC,PR,RS,MG,BA,PE,DF,GO,ES,CE")
-)
+# Já foi a lista dos 12 estados de milenarezner.com.br. Foi esvaziada por decisão
+# do Gustavo em 16/08/2026, e a decisão é coerente com as fontes: os grupos que o
+# bot lê são nacionais, de dúvida aberta ao público, e o escritório é 100%
+# digital. Filtrar por estado ali descartaria cliente por um dado que o próprio
+# post não traz — a UF é o único corte deste bot baseado em algo INFERIDO, e num
+# grupo nacional a inferência não tem de onde sair.
+#
+# Continua fazendo o que sempre fez quando alguém preencher a lista de novo (no
+# painel, sem redeploy): morder só em demanda que exige presença física.
+UFS_ATENDIDAS = _ufs(os.getenv("UFS_ATENDIDAS", ""))
 # Post que não declara lugar nenhum: aceitar? Sim, por padrão — em grupo
 # regional o lugar está implícito no grupo, e o atendimento dela é 100% digital.
 # Descartar por omissão mataria a maior parte das demandas boas.

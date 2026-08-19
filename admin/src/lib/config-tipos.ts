@@ -111,12 +111,11 @@ export const PADRAO: ConfigBot = {
   reject_english: true,
   rejeitar_divulgacao: true,
   aceitar_sem_local: true,
-  // Os estados listados em milenarezner.com.br. O site ainda fala em "demais
-  // estados sob demanda, com rede de correspondentes" — se isso valer na
-  // prática, o certo é desmarcar todos aqui, o que faz o bot aceitar demanda
-  // presencial de qualquer lugar.
-  ufs_atendidas: ['SP', 'RJ', 'SC', 'PR', 'RS', 'MG', 'BA', 'PE', 'DF', 'GO',
-                  'ES', 'CE'],
+  // Nenhum estado marcado = aceita demanda de qualquer lugar. É o padrão desde
+  // 16/08/2026: os grupos que o bot lê são nacionais e o atendimento é 100%
+  // digital, então não há lugar pelo qual descartar. Marcar estados aqui volta a
+  // ligar o corte, e ele só morde em demanda que exige presença física.
+  ufs_atendidas: [],
   sources: Object.fromEntries(
     FONTES.map((f) => [f.nome, {
       enabled: true,

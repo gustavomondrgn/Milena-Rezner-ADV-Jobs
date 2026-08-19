@@ -37,9 +37,19 @@ export async function kpis(): Promise<Kpis> {
       (SELECT count(*) FROM job_events
         WHERE status = 'queued'
           AND uid NOT IN (SELECT uid FROM job_events WHERE status = 'sent')) AS na_fila,
-      (SELECT count(*) FROM job_events, hoje
-        WHERE local_day = hoje.d AND status IN ('queued','skipped'))       AS analisadas_hoje,
-      (SELECT count(*) FROM job_events, hoje
+      -- "Analisadas" tem que conter TODO destino possível, senão o painel exibe
+      -- "89 recusadas de 76 analisadas" — foi o que apareceu na primeira medição
+      -- com dados reais, em 16/08/2026. A lista antiga era só ('queued','skipped'),
+      -- e deixava de fora justamente a divulgação, que é o destino mais comum.
+      --
+      -- DISTINCT porque um mesmo post ganha duas linhas no caminho normal
+      -- ('queued' quando aprovado, 'sent' quando publicado); contá-las como duas
+      -- análises inflaria o denominador.
+      (SELECT count(DISTINCT uid) FROM job_events, hoje
+        WHERE local_day = hoje.d
+          AND status IN ('queued','sent','skipped','ingles','divulgacao',
+                         'local','categoria'))                            AS analisadas_hoje,
+      (SELECT count(DISTINCT uid) FROM job_events, hoje
         WHERE local_day = hoje.d
           AND status IN ('skipped','ingles','divulgacao','local','categoria'))        AS recusadas_hoje,
       (SELECT round(avg(score)::numeric, 1) FROM job_events, hoje

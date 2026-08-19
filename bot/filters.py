@@ -122,8 +122,11 @@ _DIVULGACAO_FORTE = re.compile(
     r"[aà]\s+disposi[cç][aã]o\s+dos?\s+colegas|"
     r"or[cç]amento\s+sem\s+compromisso|"
     r"agende\s+(?:sua|uma)\s+(?:consulta|reuni[aã]o)|"
+    # O "em" é opcional de propósito: "Atendemos todo o Brasil" (sem o "em") é
+    # como estava escrito o anúncio real que passou batido em 16/08/2026.
     r"atu[oa]\w*\s+em\s+todo\s+o\s+brasil|"
-    r"atendemos\s+em\s+todo\s+o\s+brasil|"
+    r"atend(?:emos|imento)\s+(?:em\s+)?todo\s+o\s+brasil|"
+    r"analisamos\s+(?:o\s+)?seu\s+caso|"
     r"consulta\s+gratuita",
     re.I,
 )
