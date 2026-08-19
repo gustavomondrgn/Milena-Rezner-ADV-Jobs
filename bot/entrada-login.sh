@@ -29,11 +29,23 @@ echo "[estacao] noVNC em :8080"
 websockify --web=/usr/share/novnc 8080 localhost:5900 &
 sleep 1
 
-# O login roda em laco: se a pessoa fechar a janela ou o Facebook derrubar o
-# navegador no meio, ela reabre sozinha em vez de deixar uma tela preta.
-while true; do
-  echo "[estacao] abrindo a janela de login do Facebook"
-  python tools/facebook_login.py "${DATA_DIR}/fb_state.json" --espera 1800 || true
-  echo "[estacao] a janela fechou. Reabrindo em 10s (Ctrl-C do lado de fora para parar)."
-  sleep 10
-done
+# UMA janela, nao um laco.
+#
+# A primeira versao reabria a janela quando o login terminava — e o efeito, para
+# quem estava do outro lado, foi cruel: a pessoa venceu CAPTCHA e dois fatores,
+# o Facebook abriu, a tela ficou preta por dois segundos e um login NOVO
+# comecou do zero. Parecia que tinha deslogado. Era o oposto: a ferramenta so
+# fecha DEPOIS de confirmar a sessao e grava-la.
+echo "[estacao] abrindo a janela de login do Facebook"
+if python tools/facebook_login.py "${DATA_DIR}/fb_state.json" --espera 1800; then
+  echo "[estacao] SESSAO GRAVADA em ${DATA_DIR}/fb_state.json."
+  echo "[estacao] Pode fechar esta aba. A estacao fica parada de proposito:"
+  echo "[estacao] navegador logado exposto na internet nao se deixa aceso."
+else
+  echo "[estacao] o login NAO foi concluido — nada foi gravado."
+  echo "[estacao] Redeploye a estacao para tentar de novo."
+fi
+
+# Segura o processo para a tela continuar acessivel por alguns minutos (dá
+# tempo de ler a mensagem acima no terminal da janela), e entao sai.
+sleep 600
