@@ -1491,7 +1491,54 @@ def tentar_renovar_sessao(fonte: Any) -> bool:
             "Sessao do Facebook renovada sozinha aqui no servidor. A coleta "
             "volta no proximo ciclo — nao precisa fazer nada."
         )
-    return ok
+        return True
+
+    # Falhou: mandar o que a tela mostrava, nao so o aviso. Uma vez por dia,
+    # como qualquer alerta de operacao — captura repetida vira ruido igual.
+    diag = getattr(fonte, "ultimo_diagnostico", None) or {}
+    if diag and STATS.marcar_alerta(f"relogin:{fonte.name}", hoje_local()):
+        fases = " → ".join(
+            f"{f.get('fase')}: {f.get('url', '')[:70]}"
+            for f in diag.get("fases", [])
+        )
+        legenda = (
+            "🛠 <b>Login do Facebook parou aqui</b>\n\n"
+            f"{html.escape(fases)[:500]}"
+        )
+        if diag.get("erro"):
+            legenda += f"\n\nErro: {html.escape(str(diag['erro']))[:200]}"
+        if diag.get("texto"):
+            legenda += f"\n\nTexto da tela: {html.escape(diag['texto'])[:250]}"
+        if diag.get("png"):
+            enviar_foto_operacao(diag["png"], legenda)
+        else:
+            alertar_operacao(legenda)
+    return False
+
+
+def enviar_foto_operacao(png: bytes, legenda: str) -> None:
+    """Manda uma captura de tela para o privado de quem mantem.
+
+    Existe porque o log deste container nao sai da maquina: a API do Coolify
+    devolve o log do painel, nao o do bot. Quando o login do Facebook falha, a
+    unica coisa que resolve e VER a pagina em que ele parou — entao o bot
+    fotografa e manda.
+    """
+    if not REPORT_CHAT_IDS:
+        log.warning("Sem REPORT_CHAT_IDS — a captura da falha ficou so no container.")
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
+    for destino in REPORT_CHAT_IDS:
+        try:
+            requests.post(
+                url,
+                data={"chat_id": destino, "caption": legenda[:1024],
+                      "parse_mode": "HTML"},
+                files={"photo": ("tela.png", png, "image/png")},
+                timeout=REQUEST_TIMEOUT,
+            )
+        except requests.RequestException as exc:
+            log.error("Falha enviando a captura para %s: %s", destino, exc)
 
 
 def alertar_operacao(texto: str) -> None:

@@ -513,6 +513,11 @@ class FacebookSource(BaseSource):
         # sonda usa: é o que permite olhar o antes/depois da limpeza sem abrir um
         # segundo caminho de código, que mediria a sonda em vez do bot.
         self.ultimos_brutos: list[dict] = []
+        # O que a ultima renovacao de sessao viu, fase a fase, e a foto da tela
+        # onde ela parou. Sem isto, "nao consegui refazer o login" e uma frase
+        # sem informacao nenhuma: o log do container nao sai da maquina, e a
+        # pagina que travou e exatamente o dado que resolve.
+        self.ultimo_diagnostico: dict[str, Any] = {}
 
     # -- configuração -------------------------------------------------------
 
@@ -580,6 +585,8 @@ class FacebookSource(BaseSource):
                                             obter_codigo, ao_precisar_de_codigo)
             except Exception as exc:  # noqa: BLE001
                 log.error("Renovacao de sessao falhou: %s", exc)
+                self.ultimo_diagnostico["erro"] = str(exc)[:300]
+                self._fotografar(pagina)
                 return False
             finally:
                 try:
@@ -588,22 +595,82 @@ class FacebookSource(BaseSource):
                 except Exception:  # noqa: BLE001
                     pass
 
+    def _anotar_fase(self, pagina: Any, nome: str) -> None:
+        try:
+            titulo = pagina.title()
+        except Exception:  # noqa: BLE001
+            titulo = "?"
+        fase = {"fase": nome, "url": pagina.url, "titulo": titulo}
+        self.ultimo_diagnostico.setdefault("fases", []).append(fase)
+        log.info("[login:%s] %s | %s", nome, pagina.url, titulo)
+
+    def _fotografar(self, pagina: Any) -> None:
+        """Guarda a tela onde o login parou. E o unico jeito de eu ver daqui."""
+        try:
+            self.ultimo_diagnostico["png"] = pagina.screenshot(full_page=False)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Nao consegui fotografar a tela: %s", exc)
+        try:
+            texto = pagina.inner_text("body")[:600]
+            self.ultimo_diagnostico["texto"] = " ".join(texto.split())
+        except Exception:  # noqa: BLE001
+            pass
+
     def _fluxo_de_login(self, pagina: Any, contexto: Any, email: str, senha: str,
                         obter_codigo: Any, ao_precisar_de_codigo: Any) -> bool:
+        self.ultimo_diagnostico = {"fases": []}
         pagina.goto("https://www.facebook.com/login.php",
                     wait_until="domcontentloaded", timeout=60_000)
         self._aceitar_cookies(pagina)
+        self._anotar_fase(pagina, "tela-de-login")
 
-        pagina.fill('input[name="email"]', email, timeout=30_000)
-        pagina.fill('input[name="pass"]', senha, timeout=30_000)
-        pagina.click('button[name="login"], button[type="submit"]', timeout=30_000)
+        # Existem DUAS telas de senha, e confundi-las custa a renovacao inteira.
+        #
+        # A comum tem e-mail e senha. A outra e a "Insira sua senha para
+        # continuar", que o Facebook mostra quando ja sabe QUEM e voce (a conta
+        # esta logada) mas quer a senha de novo — tipico depois de um acesso de
+        # lugar novo. Essa NAO tem campo de e-mail: tentar preencher e-mail nela
+        # estoura o tempo de espera e derruba a renovacao com um erro que nao
+        # diz nada sobre a causa.
+        tem_email = False
+        try:
+            tem_email = pagina.locator('input[name="email"]').count() > 0
+        except Exception:  # noqa: BLE001
+            tem_email = False
+
+        if tem_email:
+            pagina.fill('input[name="email"]', email, timeout=30_000)
+            log.info("Tela de login completa (e-mail + senha).")
+        else:
+            log.info("Tela de reconfirmacao de senha (a conta ja e conhecida).")
+
+        pagina.fill('input[name="pass"], input[type="password"]', senha, timeout=30_000)
+        pagina.click(
+            'button[name="login"], button[type="submit"], #checkpointSubmitButton',
+            timeout=30_000)
         pagina.wait_for_timeout(6000)
-        log.info("Login enviado — pagina agora: %s", pagina.url)
+        self._anotar_fase(pagina, "depois-do-login")
+
+        # A reconfirmacao pode vir DEPOIS do login, na pagina seguinte. Mesma
+        # tela, mesmo tratamento.
+        if self._pede_so_a_senha(pagina):
+            log.info("Reconfirmacao de senha apos o login — respondendo.")
+            try:
+                pagina.fill('input[name="pass"], input[type="password"]', senha,
+                            timeout=20_000)
+                pagina.click('button[type="submit"], #checkpointSubmitButton',
+                             timeout=20_000)
+                pagina.wait_for_timeout(6000)
+                log.info("Reconfirmacao enviada — pagina agora: %s", pagina.url)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Falha respondendo a reconfirmacao de senha: %s", exc)
 
         if self._pede_codigo(pagina):
+            self._anotar_fase(pagina, "pediu-codigo")
             if obter_codigo is None:
                 log.error("O Facebook pediu codigo de dois fatores e nao ha de "
                           "onde tirar um (sem segredo TOTP e sem quem responda).")
+                self._fotografar(pagina)
                 return False
             if ao_precisar_de_codigo is not None:
                 try:
@@ -613,9 +680,12 @@ class FacebookSource(BaseSource):
             codigo = obter_codigo()
             if not codigo:
                 log.error("Nenhum codigo chegou a tempo — abandonando a renovacao.")
+                self._fotografar(pagina)
                 return False
             if not self._enviar_codigo(pagina, codigo):
+                self._fotografar(pagina)
                 return False
+            self._anotar_fase(pagina, "depois-do-codigo")
 
         # "Salvar navegador?" — salvar e o que evita repetir isto a cada login.
         self._confirmar_dispositivo(pagina)
@@ -624,14 +694,17 @@ class FacebookSource(BaseSource):
         pagina.goto("https://www.facebook.com/groups/feed/",
                     wait_until="domcontentloaded", timeout=60_000)
         url = (pagina.url or "").lower()
+        self._anotar_fase(pagina, "prova-final")
         if any(sinal in url for sinal in _SINAIS_LOGIN):
             log.error("Depois do login o Facebook ainda manda para %s — "
                       "provavelmente checkpoint que exige gente.", pagina.url)
+            self._fotografar(pagina)
             return False
 
         cookies = {c["name"] for c in contexto.cookies()}
         if "c_user" not in cookies:
             log.error("Login terminou sem o cookie de sessao (c_user).")
+            self._fotografar(pagina)
             return False
 
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
@@ -653,18 +726,48 @@ class FacebookSource(BaseSource):
                 continue
 
     @staticmethod
+    def _pede_so_a_senha(pagina: Any) -> bool:
+        """A tela "Insira sua senha para continuar": senha sem e-mail."""
+        try:
+            if pagina.locator('input[name="email"]').count():
+                return False
+            return pagina.locator('input[name="pass"], input[type="password"]').count() > 0
+        except Exception:  # noqa: BLE001
+            return False
+
+    @staticmethod
     def _pede_codigo(pagina: Any) -> bool:
-        if "two_factor" in (pagina.url or "").lower():
+        """Reconhece a tela de dois fatores.
+
+        Larga de proposito: se ela nao for reconhecida, o bot segue adiante,
+        falha na prova final e devolve "nao consegui" — sem NUNCA pedir o
+        codigo a quem poderia responder em dez segundos. O custo de um falso
+        positivo aqui e uma pergunta a mais no Telegram; o de um falso negativo
+        e a sessao ficar caida.
+        """
+        url = (pagina.url or "").lower()
+        if any(m in url for m in ("two_factor", "two_step", "checkpoint")):
             return True
         for seletor in ('input[name="approvals_code"]',
                         'input[autocomplete="one-time-code"]',
-                        'input[name="code"]'):
+                        'input[name="code"]',
+                        'input[id="approvals_code"]'):
             try:
                 if pagina.locator(seletor).count():
                     return True
             except Exception:  # noqa: BLE001
                 continue
-        return False
+        try:
+            texto = pagina.inner_text("body").lower()
+        except Exception:  # noqa: BLE001
+            return False
+        return any(frase in texto for frase in (
+            "codigo de login", "código de login",
+            "digite o codigo", "digite o código",
+            "insira o codigo", "insira o código",
+            "authentication code", "login code",
+            "aplicativo de autenticacao", "aplicativo de autenticação",
+        ))
 
     @staticmethod
     def _enviar_codigo(pagina: Any, codigo: str) -> bool:
