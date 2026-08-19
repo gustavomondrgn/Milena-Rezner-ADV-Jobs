@@ -44,4 +44,7 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=25s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-CMD ["node", "server.js"]
+# A semeadura do primeiro usuário roda antes do servidor e nunca o impede de
+# subir (`;`, não `&&`): painel no ar sem usuário ainda dá para consertar; painel
+# que não sobe, não.
+CMD ["sh", "-c", "node scripts/semear-usuario.mjs; node server.js"]

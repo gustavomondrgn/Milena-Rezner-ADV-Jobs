@@ -156,6 +156,12 @@ services:
       # Só funciona com SUPERGRUPO (id começando em -100); em grupo básico o
       # painel simplesmente não mostra link.
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      # Primeiro usuário do painel, criado no boot se ainda não existir. Sem
+      # isto o painel sobe sem ninguém que consiga entrar, e o sintoma parece
+      # um bug de login. Nunca sobrescreve senha de usuário já existente.
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - ADMIN_NAME=${ADMIN_NAME:-}
       - NODE_ENV=production
     depends_on:
       postgres:
