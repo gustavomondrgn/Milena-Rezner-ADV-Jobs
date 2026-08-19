@@ -134,6 +134,10 @@ services:
     # é melhor não abrir nada do que abrir num domínio errado.
     labels:
       - traefik.enable=true
+      # O container fica em duas redes (a do compose e a do proxy). Sem dizer
+      # qual delas o Traefik deve usar para alcançá-lo, ele pode escolher a
+      # errada e responder 503 "no available server" com tudo no ar.
+      - traefik.docker.network=coolify
       # HTTP só existe para mandar todo mundo para o HTTPS.
       - traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https
       - traefik.http.routers.advadmin-http.entrypoints=http
